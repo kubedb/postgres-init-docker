@@ -1,9 +1,10 @@
 #!/bin/sh
 
-set -eo pipefail
+# not supported in toybox shell
+# set -euo pipefail
 
 rm -rf /run_scripts/*
-if [[ "${SSL:-0}" = "ON" ]]; then
+if [ "${SSL:-0}" = "ON" ]; then
     cp -R /certs/ /tls/
     chmod 0600 /tls/certs/server/*
     chmod 0600 /tls/certs/client/*
