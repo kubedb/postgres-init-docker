@@ -1,4 +1,6 @@
-FROM tianon/toybox:0.8.4
+FROM alpine:latest
+
+RUN apk add --no-cache bash
 
 COPY ./scripts /scripts
 

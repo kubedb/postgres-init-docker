@@ -1,7 +1,7 @@
 SHELL=/bin/bash -o pipefail
 
 REGISTRY ?= kubedb
-BIN      := postgres-init-docker
+BIN      := postgres-init
 IMAGE    := $(REGISTRY)/$(BIN)
 TAG      := $(shell git describe --exact-match --abbrev=0 2>/dev/null || echo "")
 

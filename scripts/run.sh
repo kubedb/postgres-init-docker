@@ -1,7 +1,6 @@
-#!/bin/sh
+#!/bin/bash
 
-# not supported in toybox shell
-# set -euo pipefail
+set -euo pipefail
 
 rm -rf /run_scripts/*
 if [ "${SSL:-0}" = "ON" ]; then
