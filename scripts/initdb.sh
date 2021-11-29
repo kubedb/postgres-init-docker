@@ -53,7 +53,7 @@ fi
 distro=$(grep '^ID' /etc/os-release)
 distro=${distro#"ID="}
 if [[ "$distro" == "debian" ]]; then
-    export LD_PRELOAD='/usr/lib/libnss_wrapper.so'
+    export LD_PRELOAD="$(find /usr/lib/ -name libnss_wrapper.so)"
     touch /tmp/tmp.nss_passwd /tmp/tmp.nss_grp
     export NSS_WRAPPER_PASSWD="/tmp/tmp.nss_passwd"
     export NSS_WRAPPER_GROUP="/tmp/tmp.nss_grp"
