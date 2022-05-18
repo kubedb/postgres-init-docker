@@ -49,7 +49,6 @@ else
     fi
 fi
 
-
 distro=$(grep '^ID' /etc/os-release)
 distro=${distro#"ID="}
 if [[ "$distro" == "debian" ]]; then
