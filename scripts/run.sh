@@ -8,8 +8,8 @@ while true; do
         echo "running the initial script ..."
         /run_scripts/role/run.sh
         if [[ $STANDALONE == "false" ]]; then
-          echo "removing the initial scripts as server is not running ..."
-          rm -rf /run_scripts/*
+            echo "removing the initial scripts as server is not running ..."
+            rm -rf /run_scripts/*
         fi
     fi
     sleep 1
