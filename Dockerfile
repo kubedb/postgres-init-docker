@@ -20,5 +20,6 @@ RUN apk add --no-cache bash
 COPY scripts /tmp/scripts
 COPY init_scripts /init_scripts
 COPY --from=0 /tini /tmp/scripts/tini
+COPY role_scripts /tmp/role_scripts
 
 ENTRYPOINT ["/init_scripts/run.sh"]
