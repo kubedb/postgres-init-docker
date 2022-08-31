@@ -3,7 +3,7 @@ SHELL=/bin/bash -o pipefail
 REGISTRY   ?= kubedb
 BIN        ?= postgres-init
 IMAGE      := $(REGISTRY)/$(BIN)
-TAG        ?= $(shell git describe --exact-match --abbrev=0 2>/dev/null || echo "")
+TAG        ?= $(shell git describe --exact-match --abbrev=0 2>/dev/null || echo "0.5.0")
 
 DOCKER_PLATFORMS := linux/amd64 linux/arm64
 PLATFORM         ?= linux/$(subst x86_64,amd64,$(subst aarch64,arm64,$(shell uname -m)))
