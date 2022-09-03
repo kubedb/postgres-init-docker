@@ -92,7 +92,11 @@ echo "wal_log_hints = on" >>/tmp/postgresql.conf
 
 # we are not doing any archiving by default but it's better to have this config in our postgresql.conf file in case of customization.
 echo "archive_mode = always" >>/tmp/postgresql.conf
-echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
+if [[ "${WAL_BACKUP_TYPE:-0}" == "WALG" ]]; then
+    echo "archive_command = 'cp %p /var/pv/wal_archive/%f'" >>/tmp/postgresql.conf
+else
+    echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
+fi
 
 if [ "$STANDBY" == "hot" ]; then
     echo "hot_standby = on" >>/tmp/postgresql.conf
