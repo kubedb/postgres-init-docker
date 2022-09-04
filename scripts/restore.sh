@@ -1,7 +1,12 @@
 #!/bin/bash
-mkdir -p $PGDATA
-wal-g backup-fetch $PGDATA LATEST
 
+mkdir -p $PGDATA
+chmod 0700 "$PGDATA"
+
+if [[ "${WALG_BASE_BACKUP_NAME:-0}" != "0" ]]; then
+    echo "starting to restore from basebackup $WALG_BASE_BACKUP_NAME ..."
+    wal-g backup-fetch $PGDATA $WALG_BASE_BACKUP_NAME
+fi
 
 
 ## ****************** Recovery config 11 **************************
@@ -25,19 +30,24 @@ wal-g backup-fetch $PGDATA LATEST
 
 
 
-# ****************** Recovery config 12 **************************
+# ****************** Recovery config 12, 13, 14 **************************
 touch $PGDATA/recovery.signal
 
 # setup postgresql.conf
 touch /tmp/postgresql.conf
 echo "restore_command = 'wal-g wal-fetch %f %p'" >>/tmp/postgresql.conf
-echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
- echo "recovery_target_action = 'promote'" >>/tmp/postgresql.conf
+#echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
+if [[ "${PITR_TIME:-0}" != "latest" ]];  then
+    echo "recovery_target_time = '$PITR_TIME'">>/tmp/postgresql.conf
+else
+    echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
+fi
+echo "recovery_target_action = 'promote'" >>/tmp/postgresql.conf
 echo "wal_level = replica" >>/tmp/postgresql.conf
 echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
 
 echo "wal_keep_size = 64" >>/tmp/postgresql.conf
-
+echo "hot_standby = on" >>/tmp/postgresql.conf
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
 
 # ****************** Recovery config 12 **************************
@@ -62,12 +72,16 @@ mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 # start postgres
 pg_ctl -D "$PGDATA" -w start &
 sleep 10
-echo "hey bro i am here................................*****************************.......................................  | [[ ! -e /var/pv/data/restore.done]]"
 #  | [[ ! -e /var/pv/data/restore.done]]
-while [[ -e /var/pv/data/postmaster.pid ]]; do
+while [[ -e /var/pv/data/recovery.signal  &&  -e /var/pv/data/postmaster.pid ]]; do
     echo "restoring..."
     sleep 1
 done
 
-# stop server
-pg_ctl -D "$PGDATA" -m fast -w stop
+sleep 10
+
+if [[ ! -e /var/pv/data/recovery.signal  ]]; then
+    exit 0
+else
+    exit 1
+fi
