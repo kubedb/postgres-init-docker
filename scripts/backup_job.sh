@@ -223,8 +223,8 @@ fi
 mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 
 # start postgres
-pg_ctl -D "$PGDATA" -w start --timeout 5
+pg_ctl -D "$PGDATA" -w start --timeout 60
 
-sleep 60
+sleep 30
 # stop server
 pg_ctl -D "$PGDATA" -m fast -w stop

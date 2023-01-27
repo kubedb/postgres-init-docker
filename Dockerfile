@@ -21,5 +21,6 @@ COPY scripts /tmp/scripts
 COPY init_scripts /init_scripts
 COPY --from=0 /tini /tmp/scripts/tini
 COPY role_scripts /tmp/role_scripts
+COPY ./kubectl/kubectl /usr/local/bin/kubectl
 
 ENTRYPOINT ["/init_scripts/run.sh"]
