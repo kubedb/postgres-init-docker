@@ -3,9 +3,6 @@
 set -euo pipefail
 rm -rf /run_scripts/*
 cp /tmp/scripts/* /scripts
-
-kubectl get pods
-
 # need to set the chmod to 0700 for running postgres server in single user mode
 if [[ -e /var/pv/data/PG_VERSION ]]; then
     chmod 0700 /var/pv/data

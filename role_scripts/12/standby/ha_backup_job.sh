@@ -16,7 +16,8 @@
 
 set -eou pipefail
 
-echo "Running as Replica"
+## this script take base backup and join as an replica . the script was introduced move postrgres standalone to High avialibility.
+echo "Running as base backup job and joining as replica"
 
 # set password ENV
 export PGPASSWORD=${POSTGRES_PASSWORD:-postgres}
@@ -42,13 +43,6 @@ while true; do
     else
         pg_isready --host="$PRIMARY_HOST" --username=postgres --timeout=2 &>/dev/null && break
     fi
-
-    # check if current pod became leader itself
-    if [[ -e "/run_scripts/tmp/pg-failover-trigger" ]]; then
-        echo "Postgres promotion trigger_file found. Running primary run script"
-        /run_scripts/role/run.sh
-    fi
-    sleep 2
 done
 
 while true; do
@@ -58,12 +52,6 @@ while true; do
     else
         psql -h "$PRIMARY_HOST" --username=postgres --no-password --command="select now();" &>/dev/null && break
     fi
-    # check if current pod became leader itself
-    if [[ -e "/run_scripts/tmp/pg-failover-trigger" ]]; then
-        echo "Postgres promotion trigger_file found. Running primary run script"
-        /run_scripts/role/run.sh
-    fi
-    sleep 2
 done
 
 if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
@@ -84,7 +72,7 @@ echo "wal_level = replica" >>/tmp/postgresql.conf
 echo "shared_buffers = $SHARED_BUFFERS" >>/tmp/postgresql.conf
 echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
 
-echo "wal_keep_size = 64" >>/tmp/postgresql.conf #it was  "wal_keep_segments" in earlier version. changed in version 13
+echo "wal_keep_segments = 64" >>/tmp/postgresql.conf #it was  "wal_keep_segments" in earlier version. changed in version 13
 
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
 
@@ -113,7 +101,6 @@ fi
 if [[ "$CLIENT_AUTH_MODE" == "scram" ]]; then
     echo "password_encryption = scram-sha-256" >>/tmp/postgresql.conf
 fi
-
 # ****************** Recovery config **************************
 echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
 # primary_conninfo is used for streaming replication
@@ -145,18 +132,18 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         #*******************client auth with client.crt and key**************
 
         { echo '# IPv4 local connections:'; } >>tmp/pg_hba.conf
-        { echo 'hostssl    all             all             127.0.0.1/32            cert clientcert=verify-full'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    all             all             127.0.0.1/32            cert clientcert=1'; } >>tmp/pg_hba.conf
         { echo '# IPv6 local connections:'; } >>tmp/pg_hba.conf
-        { echo 'hostssl    all             all             ::1/128                 cert clientcert=verify-full'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    all             all             ::1/128                 cert clientcert=1'; } >>tmp/pg_hba.conf
 
         { echo 'local      replication     all                                     trust'; } >>tmp/pg_hba.conf
-        { echo 'hostssl    replication     all             127.0.0.1/32            cert clientcert=verify-full'; } >>tmp/pg_hba.conf
-        { echo 'hostssl    replication     all             ::1/128                 cert clientcert=verify-full'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             127.0.0.1/32            cert clientcert=1'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             ::1/128                 cert clientcert=1'; } >>tmp/pg_hba.conf
 
-        { echo 'hostssl    all             all             0.0.0.0/0               cert clientcert=verify-full'; } >>tmp/pg_hba.conf
-        { echo 'hostssl    replication     postgres        0.0.0.0/0               cert clientcert=verify-full'; } >>tmp/pg_hba.conf
-        { echo 'hostssl    all             all             ::/0                    cert clientcert=verify-full'; } >>tmp/pg_hba.conf
-        { echo 'hostssl    replication     postgres        ::/0                    cert clientcert=verify-full'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    all             all             0.0.0.0/0               cert clientcert=1'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     postgres        0.0.0.0/0               cert clientcert=1'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    all             all             ::/0                    cert clientcert=1'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     postgres        ::/0                    cert clientcert=1'; } >>tmp/pg_hba.conf
     elif [[ "$CLIENT_AUTH_MODE" == "scram" ]]; then
         { echo '# IPv4 local connections:'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             127.0.0.1/32            scram-sha-256'; } >>tmp/pg_hba.conf
