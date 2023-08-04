@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+export PASSWORD
+ssl
 set -eou pipefail
 
 echo "Running as Replica"
@@ -28,41 +30,32 @@ while true; do
     if [[ "${SSL:-0}" == "ON" ]]; then
         if [[ "$CLIENT_AUTH_MODE" == "cert" ]]; then
             if [[ $SSL_MODE = "verify-full" || $SSL_MODE = "verify-ca" ]]; then
-                pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --username=postgres --timeout=2 &>/dev/null && break
+                pg_isready --host="$PRIMARY_DB_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --username=postgres --timeout=2 &>/dev/null && break
             else
-                pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --username=postgres --timeout=2 &>/dev/null && break
+                pg_isready --host="$PRIMARY_DB_HOST" -d "sslmode=$SSL_MODE sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --username=postgres --timeout=2 &>/dev/null && break
             fi
         else
             if [[ $SSL_MODE = "verify-full" || $SSL_MODE = "verify-ca" ]]; then
-                pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt" --username=postgres --timeout=2 &>/dev/null && break
+                pg_isready --host="$PRIMARY_DB_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt" --username=postgres --timeout=2 &>/dev/null && break
             else
-                pg_isready --host="$PRIMARY_HOST" --username=postgres --timeout=2 &>/dev/null && break
+                pg_isready --host="$PRIMARY_DB_HOST" --username=postgres --timeout=2 &>/dev/null && break
             fi
         fi
     else
-        pg_isready --host="$PRIMARY_HOST" --username=postgres --timeout=2 &>/dev/null && break
+        pg_isready --host="$PRIMARY_DB_HOST" --username=postgres --timeout=2 &>/dev/null && break
     fi
 
-    # check if current pod became leader itself
-    if [[ -e "/run_scripts/tmp/pg-failover-trigger" ]]; then
-        echo "Postgres promotion trigger_file found. Running primary run script"
-        /run_scripts/role/run.sh
-    fi
     sleep 2
 done
 
 while true; do
     echo "Attempting query on primary"
     if [[ "${SSL:-0}" == "ON" ]]; then
-        psql -h "$PRIMARY_HOST" --username=postgres "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --command="select now();" &>/dev/null && break
+        psql -h "$PRIMARY_DB_HOST" --username=postgres "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --command="select now();" &>/dev/null && break
     else
-        psql -h "$PRIMARY_HOST" --username=postgres --no-password --command="select now();" &>/dev/null && break
+        psql -h "$PRIMARY_DB_HOST" --username=postgres --no-password --command="select now();" &>/dev/null && break
     fi
-    # check if current pod became leader itself
-    if [[ -e "/run_scripts/tmp/pg-failover-trigger" ]]; then
-        echo "Postgres promotion trigger_file found. Running primary run script"
-        /run_scripts/role/run.sh
-    fi
+
     sleep 2
 done
 
@@ -72,9 +65,9 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     rm -rf "$PGDATA"/*
     chmod 0700 "$PGDATA"
     if [[ "${SSL:-0}" == "ON" ]]; then
-        pg_basebackup -X fetch --pgdata "$PGDATA" --username=postgres --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
+        pg_basebackup -X fetch --pgdata "$PGDATA" --username=postgres --host="$PRIMARY_DB_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
     else
-        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=postgres --host="$PRIMARY_HOST"
+        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=postgres --host="$PRIMARY_DB_HOST"
     fi
 else
     /run_scripts/role/warm_stanby.sh
@@ -121,12 +114,12 @@ echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
 # primary_conninfo is used for streaming replication
 if [[ "${SSL:-0}" == "ON" ]]; then
     if [[ "$CLIENT_AUTH_MODE" == "cert" ]]; then
-        echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key'" >>/tmp/postgresql.conf
+        echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_DB_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key'" >>/tmp/postgresql.conf
     else
-        echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt'" >>/tmp/postgresql.conf
+        echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_DB_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt'" >>/tmp/postgresql.conf
     fi
 else
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD'" >>/tmp/postgresql.conf
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_DB_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD'" >>/tmp/postgresql.conf
 fi
 
 echo "promote_trigger_file = '/run_scripts/tmp/pg-failover-trigger'" >>/tmp/postgresql.conf # [ name whose presence ends recovery]

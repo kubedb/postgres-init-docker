@@ -10,7 +10,7 @@ fi
 
 if [[ $STANDALONE == "true" ]]; then
     mkdir -p /run_scripts/role
-    cp -r /tmp/role_scripts/$MAJOR_PG_VERSION/primary/* /run_scripts/role/
+    cp -r /tmp/role_scripts/$MAJOR_PG_VERSION/standby/* /run_scripts/role/
 else
     cp -r /tmp/role_scripts/$MAJOR_PG_VERSION/* /role_scripts/
 fi
