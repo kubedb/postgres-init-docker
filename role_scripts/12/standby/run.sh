@@ -86,7 +86,7 @@ echo "wal_level = replica" >>/tmp/postgresql.conf
 echo "shared_buffers = $SHARED_BUFFERS" >>/tmp/postgresql.conf
 echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
 
-echo "wal_keep_segments = 64" >>/tmp/postgresql.conf #it was  "wal_keep_segments" in earlier version. changed in version 13
+echo "wal_keep_segments = 1024" >>/tmp/postgresql.conf #it was  "wal_keep_segments" in earlier version. changed in version 13
 
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
 
