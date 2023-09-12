@@ -218,7 +218,23 @@ fi
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
     echo "synchronous_commit = remote_write" >>/tmp/postgresql.conf
-    echo "synchronous_standby_names = '*'" >>/tmp/postgresql.conf
+
+    # https://stackoverflow.com/a/44092231/244009
+    self_idx=$(echo $HOSTNAME | grep -Eo '[0-9]+$')
+    echo "$self_idx"
+
+    shopt -s extglob
+    sts_prefix=${HOSTNAME%%+([0-9])}
+    names=""
+    for ((i = 0; i < $REPLICAS; i++)); do
+        if [[ $self_idx == $i ]]; then
+            echo "skip $i"
+        else
+            names+="\"$sts_prefix$i\","
+        fi
+    done
+    names=$(echo "$names" | rev | cut -c2- | rev)
+    echo "synchronous_standby_names = 'ANY 1 ("$names")'" >>/tmp/postgresql.conf
 fi
 
 # ref: https://superuser.com/a/246841/985093

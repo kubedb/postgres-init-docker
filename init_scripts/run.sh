@@ -7,10 +7,15 @@ cp /tmp/scripts/* /scripts
 if [[ -e /var/pv/data/PG_VERSION ]]; then
     chmod 0700 /var/pv/data
 fi
+export remote_replica=${REMOTE_REPLICA:-false}
+export source_ssl=${SOURCE_SSL:-false}
 
-if [[ $STANDALONE == "true" ]]; then
+if [[ $remote_replica == "true" ]]; then
     mkdir -p /run_scripts/role
     cp -r /tmp/role_scripts/$MAJOR_PG_VERSION/standby/* /run_scripts/role/
+elif [[ $STANDALONE == "true" ]]; then
+    mkdir -p /run_scripts/role
+    cp -r /tmp/role_scripts/$MAJOR_PG_VERSION/primary/* /run_scripts/role/
 else
     cp -r /tmp/role_scripts/$MAJOR_PG_VERSION/* /role_scripts/
 fi
@@ -23,4 +28,14 @@ if [ "${SSL:-0}" = "ON" ]; then
     chmod 0600 /tls/certs/server/*
     chmod 0600 /tls/certs/client/*
     chmod 0600 /tls/certs/exporter/*
+
+fi
+if [[ $source_ssl == "ON" ]]; then
+    cp -R /certs/ /tls/
+    chmod 0600 /tls/certs/remote/*
+    if [ "${SSL:-0}" = "ON" ]; then
+        chmod 0600 /tls/certs/server/*
+        chmod 0600 /tls/certs/client/*
+        chmod 0600 /tls/certs/exporter/*
+    fi
 fi

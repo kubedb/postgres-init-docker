@@ -14,57 +14,46 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+export PASSWORD
 set -eou pipefail
 
-## this script take base backup and join as an replica . the script was introduced move postrgres standalone to High avialibility.
-echo "Running as base backup job and joining as replica"
+echo "Running as Remote Replica"
 
 # set password ENV
-export PGPASSWORD=${POSTGRES_PASSWORD:-postgres}
+export PGPASSWORD=${PRIMARY_PASSWORD:-postgres}
 
 # Waiting for running Postgres
 while true; do
     echo "Attempting pg_isready on primary"
 
-    if [[ "${SSL:-0}" == "ON" ]]; then
-        if [[ "$CLIENT_AUTH_MODE" == "cert" ]]; then
-            if [[ $SSL_MODE = "verify-full" || $SSL_MODE = "verify-ca" ]]; then
-                pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --username=postgres --timeout=2 &>/dev/null && break
-            else
-                pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --username=postgres --timeout=2 &>/dev/null && break
-            fi
-        else
-            if [[ $SSL_MODE = "verify-full" || $SSL_MODE = "verify-ca" ]]; then
-                pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt" --username=postgres --timeout=2 &>/dev/null && break
-            else
-                pg_isready --host="$PRIMARY_HOST" --username=postgres --timeout=2 &>/dev/null && break
-            fi
-        fi
+    if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
+        pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key" --username=$PRIMARY_USER_NAME --timeout=2 &>/dev/null && break
     else
-        pg_isready --host="$PRIMARY_HOST" --username=postgres --timeout=2 &>/dev/null && break
+        pg_isready --host="$PRIMARY_HOST" --username=$PRIMARY_USER_NAME --timeout=2 &>/dev/null && break
     fi
-
+    sleep 2
 done
 
 while true; do
     echo "Attempting query on primary"
-    if [[ "${SSL:-0}" == "ON" ]]; then
-        psql -h "$PRIMARY_HOST" --username=postgres "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --command="select now();" &>/dev/null && break
+    if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
+        psql -h "$PRIMARY_HOST" --username=$PRIMARY_USER_NAME -d "dbname=postgres sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key" --command="select now();" &>/dev/null && break
     else
-        psql -h "$PRIMARY_HOST" --username=postgres --no-password --command="select now();" &>/dev/null && break
+        psql -h "$PRIMARY_HOST" --username=$PRIMARY_USER_NAME -d postgres --no-password --command="select now();" &>/dev/null && break
     fi
 
+    sleep 2
 done
 
 if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
-    echo "take base basebackup..."
+    echo "taking base basebackup..."
     mkdir -p "$PGDATA"
     rm -rf "$PGDATA"/*
     chmod 0700 "$PGDATA"
-    if [[ "${SSL:-0}" == "ON" ]]; then
-        pg_basebackup -X fetch --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
+    if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
+        pg_basebackup -X fetch --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key"
     else
-        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST"
+        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST"
     fi
 fi
 
@@ -74,7 +63,7 @@ echo "wal_level = replica" >>/tmp/postgresql.conf
 echo "shared_buffers = $SHARED_BUFFERS" >>/tmp/postgresql.conf
 echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
 
-echo "wal_keep_size = 1024" >>/tmp/postgresql.conf #it was  "wal_keep_segments" in earlier version. changed in version 13
+echo "wal_keep_size = 64" >>/tmp/postgresql.conf #it was  "wal_keep_segments" in earlier version. changed in version 13
 
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
 
@@ -89,24 +78,9 @@ fi
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
     echo "synchronous_commit = remote_write" >>/tmp/postgresql.conf
-
-    # https://stackoverflow.com/a/44092231/244009
-    self_idx=$(echo $HOSTNAME | grep -Eo '[0-9]+$')
-    echo "$self_idx"
-
-    shopt -s extglob
-    sts_prefix=${HOSTNAME%%+([0-9])}
-    names=""
-    for ((i = 0; i < $REPLICAS; i++)); do
-        if [[ $self_idx == $i ]]; then
-            echo "skip $i"
-        else
-            names+="\"$sts_prefix$i\","
-        fi
-    done
-    names=$(echo "$names" | rev | cut -c2- | rev)
-    echo "synchronous_standby_names = 'ANY 1 ("$names")'" >>/tmp/postgresql.conf
+    echo "synchronous_standby_names = '*'" >>/tmp/postgresql.conf
 fi
+
 if [[ "${SSL:-0}" == "ON" ]]; then
     echo "ssl = on" >>/tmp/postgresql.conf
 
@@ -122,19 +96,15 @@ fi
 # ****************** Recovery config **************************
 echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
 # primary_conninfo is used for streaming replication
-if [[ "${SSL:-0}" == "ON" ]]; then
-    if [[ "$CLIENT_AUTH_MODE" == "cert" ]]; then
-        echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key'" >>/tmp/postgresql.conf
-    else
-        echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt'" >>/tmp/postgresql.conf
-    fi
+if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key'" >>/tmp/postgresql.conf
 else
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD'" >>/tmp/postgresql.conf
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD'" >>/tmp/postgresql.conf
 fi
 
 echo "promote_trigger_file = '/run_scripts/tmp/pg-failover-trigger'" >>/tmp/postgresql.conf # [ name whose presence ends recovery]
 
-cat /role_scripts/standby/postgresql.conf >>/tmp/postgresql.conf
+cat /run_scripts/role/postgresql.conf >>/tmp/postgresql.conf
 mv /tmp/postgresql.conf "$PGDATA/postgresql.conf"
 
 touch "$PGDATA/standby.signal"
@@ -226,10 +196,4 @@ else
 fi
 
 mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
-
-# start and exit potgres
-pg_ctl -D "$PGDATA" -w start --timeout 60
-
-sleep 30
-# stop server
-pg_ctl -D "$PGDATA" -m fast -w stop
+exec postgres

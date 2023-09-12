@@ -14,8 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-export PASSWORD
-ssl
 set -eou pipefail
 
 echo "Running as Replica"
@@ -30,32 +28,41 @@ while true; do
     if [[ "${SSL:-0}" == "ON" ]]; then
         if [[ "$CLIENT_AUTH_MODE" == "cert" ]]; then
             if [[ $SSL_MODE = "verify-full" || $SSL_MODE = "verify-ca" ]]; then
-                pg_isready --host="$PRIMARY_DB_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --username=postgres --timeout=2 &>/dev/null && break
+                pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --username=postgres --timeout=2 &>/dev/null && break
             else
-                pg_isready --host="$PRIMARY_DB_HOST" -d "sslmode=$SSL_MODE sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --username=postgres --timeout=2 &>/dev/null && break
+                pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --username=postgres --timeout=2 &>/dev/null && break
             fi
         else
             if [[ $SSL_MODE = "verify-full" || $SSL_MODE = "verify-ca" ]]; then
-                pg_isready --host="$PRIMARY_DB_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt" --username=postgres --timeout=2 &>/dev/null && break
+                pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt" --username=postgres --timeout=2 &>/dev/null && break
             else
-                pg_isready --host="$PRIMARY_DB_HOST" --username=postgres --timeout=2 &>/dev/null && break
+                pg_isready --host="$PRIMARY_HOST" --username=postgres --timeout=2 &>/dev/null && break
             fi
         fi
     else
-        pg_isready --host="$PRIMARY_DB_HOST" --username=postgres --timeout=2 &>/dev/null && break
+        pg_isready --host="$PRIMARY_HOST" --username=postgres --timeout=2 &>/dev/null && break
     fi
 
+    # check if current pod became leader itself
+    if [[ -e "/run_scripts/tmp/pg-failover-trigger" ]]; then
+        echo "Postgres promotion trigger_file found. Running primary run script"
+        /run_scripts/role/run.sh
+    fi
     sleep 2
 done
 
 while true; do
     echo "Attempting query on primary"
     if [[ "${SSL:-0}" == "ON" ]]; then
-        psql -h "$PRIMARY_DB_HOST" --username=postgres "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --command="select now();" &>/dev/null && break
+        psql -h "$PRIMARY_HOST" --username=postgres "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --command="select now();" &>/dev/null && break
     else
-        psql -h "$PRIMARY_DB_HOST" --username=postgres --no-password --command="select now();" &>/dev/null && break
+        psql -h "$PRIMARY_HOST" --username=postgres --no-password --command="select now();" &>/dev/null && break
     fi
-
+    # check if current pod became leader itself
+    if [[ -e "/run_scripts/tmp/pg-failover-trigger" ]]; then
+        echo "Postgres promotion trigger_file found. Running primary run script"
+        /run_scripts/role/run.sh
+    fi
     sleep 2
 done
 
@@ -65,9 +72,9 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     rm -rf "$PGDATA"/*
     chmod 0700 "$PGDATA"
     if [[ "${SSL:-0}" == "ON" ]]; then
-        pg_basebackup -X fetch --pgdata "$PGDATA" --username=postgres --host="$PRIMARY_DB_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
+        pg_basebackup -X fetch --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
     else
-        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=postgres --host="$PRIMARY_DB_HOST"
+        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST"
     fi
 else
     /run_scripts/role/warm_stanby.sh
@@ -94,7 +101,23 @@ fi
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
     echo "synchronous_commit = remote_write" >>/tmp/postgresql.conf
-    echo "synchronous_standby_names = '*'" >>/tmp/postgresql.conf
+
+    # https://stackoverflow.com/a/44092231/244009
+    self_idx=$(echo $HOSTNAME | grep -Eo '[0-9]+$')
+    echo "$self_idx"
+
+    shopt -s extglob
+    sts_prefix=${HOSTNAME%%+([0-9])}
+    names=""
+    for ((i = 0; i < $REPLICAS; i++)); do
+        if [[ $self_idx == $i ]]; then
+            echo "skip $i"
+        else
+            names+="\"$sts_prefix$i\","
+        fi
+    done
+    names=$(echo "$names" | rev | cut -c2- | rev)
+    echo "synchronous_standby_names = 'ANY 1 ("$names")'" >>/tmp/postgresql.conf
 fi
 
 if [[ "${SSL:-0}" == "ON" ]]; then
@@ -114,12 +137,12 @@ echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
 # primary_conninfo is used for streaming replication
 if [[ "${SSL:-0}" == "ON" ]]; then
     if [[ "$CLIENT_AUTH_MODE" == "cert" ]]; then
-        echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_DB_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key'" >>/tmp/postgresql.conf
+        echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key'" >>/tmp/postgresql.conf
     else
-        echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_DB_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt'" >>/tmp/postgresql.conf
+        echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt'" >>/tmp/postgresql.conf
     fi
 else
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_DB_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD'" >>/tmp/postgresql.conf
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$POSTGRES_USER password=$POSTGRES_PASSWORD'" >>/tmp/postgresql.conf
 fi
 
 echo "promote_trigger_file = '/run_scripts/tmp/pg-failover-trigger'" >>/tmp/postgresql.conf # [ name whose presence ends recovery]
@@ -152,6 +175,8 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         { echo 'hostssl    replication     postgres        0.0.0.0/0               cert clientcert=verify-full'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             ::/0                    cert clientcert=verify-full'; } >>tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        ::/0                    cert clientcert=verify-full'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             0.0.0.0/0               cert clientcert=verify-full'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             ::/0                    cert clientcert=verify-full'; } >>tmp/pg_hba.conf
     elif [[ "$CLIENT_AUTH_MODE" == "scram" ]]; then
         { echo '# IPv4 local connections:'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             127.0.0.1/32            scram-sha-256'; } >>tmp/pg_hba.conf
@@ -166,6 +191,8 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         { echo 'hostssl    replication     postgres        0.0.0.0/0               scram-sha-256'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             0.0.0.0/0               scram-sha-256'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
     else
         { echo '# IPv4 local connections:'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             127.0.0.1/32            md5'; } >>tmp/pg_hba.conf
@@ -180,6 +207,8 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         { echo 'hostssl    replication     postgres        0.0.0.0/0               md5'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             ::/0                    md5'; } >>tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        ::/0                    md5'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             0.0.0.0/0               md5'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             ::/0                    md5'; } >>tmp/pg_hba.conf
     fi
 
 else
@@ -197,6 +226,8 @@ else
         { echo 'host         replication     postgres        0.0.0.0/0               scram-sha-256'; } >>tmp/pg_hba.conf
         { echo 'host         all             all             ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
         { echo 'host         replication     postgres        ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
+        { echo 'host         replication     all             0.0.0.0/0               scram-sha-256'; } >>tmp/pg_hba.conf
+        { echo 'host         replication     all             ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
     else
         { echo '# IPv4 local connections:'; } >>tmp/pg_hba.conf
         { echo 'host         all             all             127.0.0.1/32            trust'; } >>tmp/pg_hba.conf
@@ -211,6 +242,8 @@ else
         { echo 'host         replication     postgres        0.0.0.0/0               md5'; } >>tmp/pg_hba.conf
         { echo 'host         all             all             ::/0                    md5'; } >>tmp/pg_hba.conf
         { echo 'host         replication     postgres        ::/0                    md5'; } >>tmp/pg_hba.conf
+        { echo 'host         replication     all             0.0.0.0/0               md5'; } >>tmp/pg_hba.conf
+        { echo 'host         replication     all             ::/0                    md5'; } >>tmp/pg_hba.conf
     fi
 
 fi
