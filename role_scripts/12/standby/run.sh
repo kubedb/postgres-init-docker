@@ -72,9 +72,9 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     rm -rf "$PGDATA"/*
     chmod 0700 "$PGDATA"
     if [[ "${SSL:-0}" == "ON" ]]; then
-        pg_basebackup -X fetch --pgdata "$PGDATA" --username=postgres --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
+        pg_basebackup -X fetch --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
     else
-        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=postgres --host="$PRIMARY_HOST"
+        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST"
     fi
 else
     /run_scripts/role/warm_stanby.sh
@@ -101,9 +101,24 @@ fi
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
     echo "synchronous_commit = remote_write" >>/tmp/postgresql.conf
-    echo "synchronous_standby_names = '*'" >>/tmp/postgresql.conf
-fi
 
+    # https://stackoverflow.com/a/44092231/244009
+    self_idx=$(echo $HOSTNAME | grep -Eo '[0-9]+$')
+    echo "$self_idx"
+
+    shopt -s extglob
+    sts_prefix=${HOSTNAME%%+([0-9])}
+    names=""
+    for ((i = 0; i < $REPLICAS; i++)); do
+        if [[ $self_idx == $i ]]; then
+            echo "skip $i"
+        else
+            names+="\"$sts_prefix$i\","
+        fi
+    done
+    names=$(echo "$names" | rev | cut -c2- | rev)
+    echo "synchronous_standby_names = 'ANY 1 ("$names")'" >>/tmp/postgresql.conf
+fi
 if [[ "${SSL:-0}" == "ON" ]]; then
     echo "ssl = on" >>/tmp/postgresql.conf
 
