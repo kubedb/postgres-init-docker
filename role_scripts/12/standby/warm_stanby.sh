@@ -27,6 +27,7 @@ echo "wal_log_hints = on" >>/tmp/postgresql.conf
 # we are not doing any archiving by default but it's better to have this config in our postgresql.conf file in case of customization.
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
+echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
 
 echo "hot_standby = off" >>/tmp/postgresql.conf
 

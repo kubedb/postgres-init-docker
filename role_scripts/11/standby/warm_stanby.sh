@@ -30,6 +30,7 @@ echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 
 echo "hot_standby = off" >>/tmp/postgresql.conf
+echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
 
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication

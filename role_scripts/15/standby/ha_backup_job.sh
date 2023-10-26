@@ -82,6 +82,8 @@ echo "wal_log_hints = on" >>/tmp/postgresql.conf
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 
+echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
+
 if [ "$STANDBY" == "hot" ]; then
     echo "hot_standby = on" >>/tmp/postgresql.conf
 fi
