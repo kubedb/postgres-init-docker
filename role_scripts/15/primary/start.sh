@@ -28,6 +28,8 @@ echo "wal_log_hints = on" >>/tmp/postgresql.conf
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 
+echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
+
 if [[ "${SSL:-0}" == "ON" ]]; then
     echo "ssl =on" >>/tmp/postgresql.conf
     echo "ssl_cert_file ='/tls/certs/server/server.crt'" >>/tmp/postgresql.conf

@@ -25,6 +25,7 @@ echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must 
 echo "wal_keep_segments = 1024" >>/tmp/postgresql.conf
 
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
+echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
 
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
