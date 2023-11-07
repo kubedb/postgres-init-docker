@@ -30,7 +30,6 @@ else
     echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 fi
 
-
 if [[ "${SSL:-0}" == "ON" ]]; then
     echo "ssl =on" >>/tmp/postgresql.conf
     echo "ssl_cert_file ='/tls/certs/server/server.crt'" >>/tmp/postgresql.conf

@@ -8,7 +8,6 @@ if [[ "${WALG_BASE_BACKUP_NAME:-0}" != "0" ]]; then
     wal-g backup-fetch $PGDATA $WALG_BASE_BACKUP_NAME
 fi
 
-
 ## ****************** Recovery config 11 **************************
 #touch /tmp/recovery.conf
 #echo "restore_command = 'wal-g wal-fetch %f %p'" >>/tmp/recovery.conf
@@ -28,8 +27,6 @@ fi
 #
 #echo "wal_log_hints = on" >>/tmp/postgresql.conf
 
-
-
 # ****************** Recovery config 12, 13, 14 **************************
 touch $PGDATA/recovery.signal
 
@@ -37,8 +34,8 @@ touch $PGDATA/recovery.signal
 touch /tmp/postgresql.conf
 echo "restore_command = 'wal-g wal-fetch %f %p'" >>/tmp/postgresql.conf
 #echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
-if [[ "${PITR_TIME:-0}" != "latest" ]];  then
-    echo "recovery_target_time = '$PITR_TIME'">>/tmp/postgresql.conf
+if [[ "${PITR_TIME:-0}" != "latest" ]]; then
+    echo "recovery_target_time = '$PITR_TIME'" >>/tmp/postgresql.conf
 else
     echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
 fi
@@ -54,8 +51,6 @@ echo "wal_log_hints = on" >>/tmp/postgresql.conf
 # we are not doing any archiving by default but it's better to have this config in our postgresql.conf file in case of customization.
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
-
-
 
 cat /run_scripts/role/postgresql.conf >>/tmp/postgresql.conf
 mv /tmp/postgresql.conf "$PGDATA/postgresql.conf"
@@ -73,14 +68,19 @@ mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 pg_ctl -D "$PGDATA" -w start &
 sleep 10
 #  | [[ ! -e /var/pv/data/restore.done]]
-while [[ -e /var/pv/data/recovery.signal  &&  -e /var/pv/data/postmaster.pid ]]; do
+while [[ -e /var/pv/data/recovery.signal && -e /var/pv/data/postmaster.pid ]]; do
     echo "restoring..."
+    cluster_state=$(pg_controldata | grep "Database cluster state" | awk '{print $4, $5}')
+    if [[ $cluster_state == "in production" ]]; then
+        echo "database succefully recovered...."
+        rm -rf /var/pv/data/recovery.signal
+    fi
     sleep 1
 done
 
 sleep 10
 
-if [[ ! -e /var/pv/data/recovery.signal  ]]; then
+if [[ ! -e /var/pv/data/recovery.signal ]]; then
     exit 0
 else
     exit 1
