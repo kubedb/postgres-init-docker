@@ -1,15 +1,25 @@
-FROM alpine
+FROM golang:alpine AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
 
-RUN set -x \
-	&& apk add --update ca-certificates curl
+ENV WALG_VERSION=kubedb-v2023.11.30
 
-RUN curl -fsSL -o tini https://github.com/kubedb/tini/releases/download/v0.20.0/tini-static-${TARGETARCH} \
+ENV _build_deps="wget cmake git build-base bash curl xz-dev lzo-dev"
+
+RUN set -ex  \
+     && apk add --no-cache $_build_deps
+
+RUN set -ex \
+    && cd / \
+    && curl -fsSL -o tini https://github.com/kubedb/tini/releases/download/v0.20.0/tini-static-${TARGETARCH} \
 	&& chmod +x tini
 
-
+RUN set -x \
+  && git clone https://github.com/kubedb/wal-g.git \
+  && cd wal-g \
+  && git checkout  kubedb-v2023.11.30\
+  && CGO_ENABLED=0 go build -v -o /wal-g ./main/pg/main.go
 
 FROM alpine
 
@@ -19,7 +29,8 @@ RUN apk add --no-cache bash
 
 COPY scripts /tmp/scripts
 COPY init_scripts /init_scripts
-COPY --from=0 /tini /tmp/scripts/tini
+COPY --from=builder /tini /tmp/scripts/tini
+COPY --from=builder /wal-g /tmp/scripts/wal-g
 COPY role_scripts /tmp/role_scripts
 
 ENTRYPOINT ["/init_scripts/run.sh"]

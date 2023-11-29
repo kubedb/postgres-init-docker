@@ -24,7 +24,13 @@ echo "wal_keep_segments = 1024" >>/tmp/postgresql.conf
 
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
 echo "archive_mode = always" >>/tmp/postgresql.conf
-echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
+
+if [[ "${WAL_BACKUP_TYPE:-0}" == "WALG" ]]; then
+    echo "archive_command = 'cp %p /var/pv/wal_archive/%f'" >>/tmp/postgresql.conf
+else
+    echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
+fi
+
 echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
 
 if [[ "${SSL:-0}" == "ON" ]]; then
