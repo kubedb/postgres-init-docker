@@ -3,7 +3,7 @@ FROM golang:alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
-ENV WALG_VERSION=release-v2023.11.30
+ENV WALG_VERSION="release-v2023.11.30"
 
 ENV _build_deps="wget cmake git build-base bash curl xz-dev lzo-dev"
 
@@ -18,7 +18,7 @@ RUN set -ex \
 RUN set -x \
   && git clone https://github.com/kubedb/wal-g.git \
   && cd wal-g \
-  && git checkout  kubedb-v2023.11.30\
+  && git checkout $(WALG_VERSION) \
   && CGO_ENABLED=0 go build -v -o /wal-g ./main/pg/main.go
 
 FROM alpine
