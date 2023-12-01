@@ -3,7 +3,7 @@ FROM golang:alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
-ENV WALG_VERSION=kubedb-v2023.11.30
+ENV WALG_VERSION=release-v2023.11.30
 
 ENV _build_deps="wget cmake git build-base bash curl xz-dev lzo-dev"
 
