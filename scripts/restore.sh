@@ -3,6 +3,9 @@
 mkdir -p $PGDATA
 chmod 0700 "$PGDATA"
 
+# remove raft wal
+rm -rf /var/pv/raftwal && rm -rf /var/pv/raftsnapshot
+
 if [[ "${WALG_BASE_BACKUP_NAME:-0}" != "0" ]]; then
     echo "starting to restore from basebackup $WALG_BASE_BACKUP_NAME ..."
     wal-g backup-fetch $PGDATA $WALG_BASE_BACKUP_NAME
