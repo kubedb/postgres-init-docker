@@ -2,6 +2,8 @@
 
 mkdir -p $PGDATA
 chmod 0700 "$PGDATA"
+# remove raft wal
+rm -rf /var/pv/raftwal && rm -rf /var/pv/raftsnapshot
 
 # remove raft wal
 rm -rf /var/pv/raftwal && rm -rf /var/pv/raftsnapshot
