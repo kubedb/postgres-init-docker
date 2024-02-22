@@ -66,6 +66,28 @@ while true; do
     sleep 2
 done
 
+if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
+  CLEAN_HOSTNAME="${HOSTNAME//[^[:alnum:]]/}"
+  while true; do
+      echo "Create replication slot on primary"
+      if [[ "${SSL:-0}" == "ON" ]]; then
+          output=$(psql -h "$PRIMARY_HOST" --username=postgres "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --command="SELECT pg_create_physical_replication_slot('${CLEAN_HOSTNAME}', true);")
+      else
+          output=$(psql -h "$PRIMARY_HOST" --username=postgres --no-password --command="SELECT pg_create_physical_replication_slot('${CLEAN_HOSTNAME}', true);")
+      fi
+      # check if current pod became leader itself
+      if [[ $output == *"(1 row)"* || $output == *"already exists"* ]]; then
+        break
+      fi
+
+      if [[ -e "/run_scripts/tmp/pg-failover-trigger" ]]; then
+          echo "Postgres promotion trigger_file found. Running primary run script"
+          /run_scripts/role/run.sh
+      fi
+      sleep 2
+  done
+fi
+
 if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     echo "take base basebackup..."
     # get basebackup
@@ -91,14 +113,17 @@ touch /tmp/postgresql.conf
 echo "wal_level = replica" >>/tmp/postgresql.conf
 echo "shared_buffers = $SHARED_BUFFERS" >>/tmp/postgresql.conf
 echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
-echo "wal_keep_segments = 1024" >>/tmp/postgresql.conf
+#echo "wal_keep_segments = 1024" >>/tmp/postgresql.conf
+if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
+    echo "${WAL_RETAIN_PARAM}=${WAL_RETAIN_AMOUNT}" >>/tmp/postgresql.conf
+fi
 
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
 
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
-
+echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 if [ "$STANDBY" == "hot" ]; then
     echo "hot_standby = on" >>/tmp/postgresql.conf
 fi

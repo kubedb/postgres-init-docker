@@ -20,10 +20,13 @@ echo "wal_level = replica" >>/tmp/postgresql.conf
 echo "shared_buffers = $SHARED_BUFFERS" >>/tmp/postgresql.conf
 echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
 
-echo "wal_keep_size = 1024" >>/tmp/postgresql.conf
+# echo "wal_keep_size = 1024" >>/tmp/postgresql.conf
+if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
+    echo "${WAL_RETAIN_PARAM}=${WAL_RETAIN_AMOUNT}" >>/tmp/postgresql.conf
+fi
 
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
-
+echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 # we are not doing any archiving by default but it's better to have this config in our postgresql.conf file in case of customization.
 echo "archive_mode = always" >>/tmp/postgresql.conf
 if [[ "${WAL_BACKUP_TYPE:-0}" == "WALG" ]]; then
