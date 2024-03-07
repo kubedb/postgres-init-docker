@@ -71,11 +71,12 @@ if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
   while true; do
       echo "Create replication slot on primary"
       if [[ "${SSL:-0}" == "ON" ]]; then
-          output=$(psql -h "$PRIMARY_HOST" --username=postgres "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --command="SELECT pg_create_physical_replication_slot('${CLEAN_HOSTNAME}', true);")
+          output=$(psql -h "$PRIMARY_HOST" --username=postgres "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --command="SELECT pg_create_physical_replication_slot('${CLEAN_HOSTNAME}', true);" 2>&1 || true)
       else
-          output=$(psql -h "$PRIMARY_HOST" --username=postgres --no-password --command="SELECT pg_create_physical_replication_slot('${CLEAN_HOSTNAME}', true);")
+          output=$(psql -h "$PRIMARY_HOST" --username=postgres --no-password --command="SELECT pg_create_physical_replication_slot('${CLEAN_HOSTNAME}', true);" 2>&1 || true)
       fi
       # check if current pod became leader itself
+
       if [[ $output == *"(1 row)"* || $output == *"already exists"* ]]; then
         break
       fi
