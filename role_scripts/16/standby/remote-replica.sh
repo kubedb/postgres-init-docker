@@ -66,6 +66,8 @@ echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 # echo "wal_keep_size = 64" >>/tmp/postgresql.conf #it was  "wal_keep_segments" in earlier version. changed in version 13
 if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
     echo "${WAL_RETAIN_PARAM}=${WAL_RETAIN_AMOUNT}" >>/tmp/postgresql.conf
+else
+  echo "wal_keep_size = 1024" >>/tmp/postgresql.conf
 fi
 if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
   CLEAN_HOSTNAME="${HOSTNAME//[^[:alnum:]]/}"

@@ -113,6 +113,8 @@ echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must 
 # echo "wal_keep_segments = 1024" >>/tmp/postgresql.conf #it was  "wal_keep_segments" in earlier version. changed in version 13
 if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
     echo "${WAL_RETAIN_PARAM}=${WAL_RETAIN_AMOUNT}" >>/tmp/postgresql.conf
+else
+  echo "wal_keep_segments = 64" >>/tmp/postgresql.conf
 fi
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
