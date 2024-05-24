@@ -28,7 +28,7 @@ else
 fi
 if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
   CLEAN_HOSTNAME="${HOSTNAME//[^[:alnum:]]/}"
-  echo "primary_slot_name="$CLEAN_HOSTNAME"" >>/tmp/recovery.conf
+  echo "primary_slot_name="$CLEAN_HOSTNAME"" >>/tmp/postgresql.conf
 fi
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
@@ -117,6 +117,8 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         { echo 'hostssl    replication     postgres        0.0.0.0/0               cert clientcert=verify-full'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             ::/0                    cert clientcert=verify-full'; } >>tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        ::/0                    cert clientcert=verify-full'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             0.0.0.0/0               cert clientcert=verify-full'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             ::/0                    cert clientcert=verify-full'; } >>tmp/pg_hba.conf
     elif [[ "$CLIENT_AUTH_MODE" == "scram" ]]; then
         { echo '# IPv4 local connections:'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             127.0.0.1/32            scram-sha-256'; } >>tmp/pg_hba.conf
@@ -131,6 +133,8 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         { echo 'hostssl    replication     postgres        0.0.0.0/0               scram-sha-256'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             0.0.0.0/0               scram-sha-256'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
     else
         { echo '# IPv4 local connections:'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             127.0.0.1/32            md5'; } >>tmp/pg_hba.conf
@@ -145,6 +149,8 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         { echo 'hostssl    replication     postgres        0.0.0.0/0               md5'; } >>tmp/pg_hba.conf
         { echo 'hostssl    all             all             ::/0                    md5'; } >>tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        ::/0                    md5'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             0.0.0.0/0               md5'; } >>tmp/pg_hba.conf
+        { echo 'hostssl    replication     all             ::/0                    md5'; } >>tmp/pg_hba.conf
     fi
 
 else
@@ -162,6 +168,8 @@ else
         { echo 'host         replication     postgres        0.0.0.0/0               scram-sha-256'; } >>tmp/pg_hba.conf
         { echo 'host         all             all             ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
         { echo 'host         replication     postgres        ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
+        { echo 'host         replication     all             0.0.0.0/0               scram-sha-256'; } >>tmp/pg_hba.conf
+        { echo 'host         replication     all             ::/0                    scram-sha-256'; } >>tmp/pg_hba.conf
     else
         { echo '# IPv4 local connections:'; } >>tmp/pg_hba.conf
         { echo 'host         all             all             127.0.0.1/32            trust'; } >>tmp/pg_hba.conf
@@ -176,6 +184,8 @@ else
         { echo 'host         replication     postgres        0.0.0.0/0               md5'; } >>tmp/pg_hba.conf
         { echo 'host         all             all             ::/0                    md5'; } >>tmp/pg_hba.conf
         { echo 'host         replication     postgres        ::/0                    md5'; } >>tmp/pg_hba.conf
+        { echo 'host         replication     all             0.0.0.0/0               md5'; } >>tmp/pg_hba.conf
+        { echo 'host         replication     all             ::/0                    md5'; } >>tmp/pg_hba.conf
     fi
 
 fi

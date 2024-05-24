@@ -82,7 +82,7 @@ else
 fi
 if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
   CLEAN_HOSTNAME="${HOSTNAME//[^[:alnum:]]/}"
-  echo "primary_slot_name="$CLEAN_HOSTNAME"" >>/tmp/recovery.conf
+  echo "primary_slot_name="$CLEAN_HOSTNAME"" >>/tmp/postgresql.conf
 fi
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
