@@ -20,7 +20,7 @@ set -eou pipefail
 echo "Running as Remote Replica"
 
 # set password ENV
-export PGPASSWORD=${PRIMARY_PASSWORD:-postgres}
+export PGPASSWORD=${PRIMARY_PASSWORD:-}
 
 # Waiting for running Postgres
 while true; do
