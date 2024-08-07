@@ -46,9 +46,15 @@ if [[ "${SSL:-0}" == "ON" ]]; then
     echo "ssl_ca_file ='/tls/certs/server/ca.crt'" >>/tmp/postgresql.conf
 fi
 
+if [[ "$CLIENT_AUTH_MODE" == "md5" ]]; then
+    echo "password_encryption = md5" >>/tmp/postgresql.conf
+fi
+
 if [[ "$CLIENT_AUTH_MODE" == "scram" ]]; then
     echo "password_encryption = scram-sha-256" >>/tmp/postgresql.conf
 fi
+
+
 
 # ****************** Recovery config **************************
 echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
