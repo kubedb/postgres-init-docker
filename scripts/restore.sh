@@ -1,5 +1,13 @@
 #!/bin/bash
 
+DONE_FILE="var/pv/done.txt"
+LOG_DIR="$PGDATA"/log
+PATTERN1="recovery stopping before commit of transaction"
+PATTERN2="pausing at the end of recovery"
+PATTERN3="Execute pg_wal_replay_resume()"
+PATTERN4="recovery has paused"
+LOG_FILE_PATTERN="postgresql-*.log"
+RECOVERY_FILE="$PGDATA"/recovery.signal
 mkdir -p $PGDATA
 chmod 0700 "$PGDATA"
 
@@ -13,8 +21,9 @@ fi
 
 # check postgresql veriosn
 
-if [[ "$PG_MAJOR" == "11" ]]; then
 
+if [[ "$PG_MAJOR" == "11" ]]; then
+    RECOVERY_FILE="$PGDATA"/recovery.conf
     # ****************** Recovery config 11 **************************
     touch /tmp/recovery.conf
     echo "restore_command = 'wal-g wal-fetch %f %p'" >>/tmp/recovery.conf
@@ -25,7 +34,7 @@ if [[ "$PG_MAJOR" == "11" ]]; then
     else
         echo "recovery_target_timeline = 'latest'" >>/tmp/recovery.conf
     fi
-    echo "recovery_target_action = 'promote'" >>/tmp/recovery.conf
+    echo "recovery_target_action = 'pause'" >>/tmp/recovery.conf
     mv /tmp/recovery.conf "$PGDATA/recovery.conf"
 
     # setup postgresql.conf
@@ -33,8 +42,7 @@ if [[ "$PG_MAJOR" == "11" ]]; then
     echo "wal_level = replica" >>/tmp/postgresql.conf
     echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
 
-    # echo "wal_keep_segments = 64" >>/tmp/postgresql.conf
-    echo "wal_keep_segments = 64" >>/tmp/postgresql.conf
+    echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
     echo "wal_log_hints = on" >>/tmp/postgresql.conf
 else
     # ****************** Recovery config 12, 13, 14 **************************
@@ -43,18 +51,20 @@ else
     # setup postgresql.conf
     touch /tmp/postgresql.conf
     echo "restore_command = 'wal-g wal-fetch %f %p'" >>/tmp/postgresql.conf
-    #echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
     if [[ "${PITR_TIME:-0}" != "latest" ]]; then
         echo "recovery_target_time = '$PITR_TIME'" >>/tmp/postgresql.conf
     else
         echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
     fi
-    echo "recovery_target_action = 'promote'" >>/tmp/postgresql.conf
+    echo "recovery_target_action = 'pause'" >>/tmp/postgresql.conf
     echo "wal_level = replica" >>/tmp/postgresql.conf
     echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
 
-    # echo "wal_keep_size = 64" >>/tmp/postgresql.conf
-    echo "wal_keep_size = 1024" >>/tmp/postgresql.conf
+    if [[ "$PG_MAJOR" == "12" ]]; then
+      echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
+    else
+      echo "wal_keep_size = 2560" >>/tmp/postgresql.conf
+    fi
     echo "hot_standby = on" >>/tmp/postgresql.conf
     echo "wal_log_hints = on" >>/tmp/postgresql.conf
 
@@ -64,7 +74,7 @@ fi
 # we are not doing any archiving by default but it's better to have this config in our postgresql.conf file in case of customization.
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
-
+echo "logging_collector = on" >>/tmp/postgresql.conf
 cat /run_scripts/role/postgresql.conf >>/tmp/postgresql.conf
 mv /tmp/postgresql.conf "$PGDATA/postgresql.conf"
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
@@ -81,19 +91,39 @@ mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 pg_ctl -D "$PGDATA" -w start &
 sleep 10
 #  | [[ ! -e /var/pv/data/restore.done]]
-while [[ -e /var/pv/data/recovery.signal && -e /var/pv/data/postmaster.pid ]]; do
+while [[ -e "$RECOVERY_FILE" && -e /var/pv/data/postmaster.pid ]]; do
     echo "restoring..."
     cluster_state=$(pg_controldata | grep "Database cluster state" | awk '{print $4, $5}')
     if [[ $cluster_state == "in production" ]]; then
-        echo "database succefully recovered...."
-        rm -rf /var/pv/data/recovery.signal
+        rm -rf "$RECOVERY_FILE"
     fi
+
+    if grep -rq "$PATTERN1" "$LOG_DIR" && (grep -rq "$PATTERN2" "$LOG_DIR" ||  grep -rq "$PATTERN4" "$LOG_DIR") && grep -rq "$PATTERN3" "$LOG_DIR"; then
+        echo "Recovery was paused."
+        rm -rf "$RECOVERY_FILE"
+    fi
+
+    if [[ -e "$DONE_FILE" ]]; then
+        echo "Recovery was Stopped in the presence of $DONE_FILE file."
+        rm -rf "$RECOVERY_FILE"
+    fi
+
     sleep 1
 done
 
-sleep 10
 
-if [[ ! -e /var/pv/data/recovery.signal ]]; then
+sleep 8
+# Find and output all log files matching the pattern
+for log_file in "$LOG_DIR"/$LOG_FILE_PATTERN; do
+    echo "---------------------------------------"
+    echo "Outputting contents of: $log_file"
+    cat "$log_file"
+    echo "---------------------------------------"
+done
+
+
+if [[ ! -e "$RECOVERY_FILE" ]]; then
+    echo "database successfully recovered...."
     exit 0
 else
     exit 1
