@@ -1,11 +1,25 @@
 #!/usr/bin/env bash
-
+RECOVERY_DONE_FILE="/var/pv/recovery.done"
 STOP=false
 # don't restart postgres on SIGTERM (eg, pod deleted)
 # ref: https://opensource.com/article/20/6/bash-trap
 trap \
     "{ STOP=true; }" \
     SIGINT SIGTERM EXIT
+
+if [[ "$PITR_RESTORE" == "true" ]]; then
+    while true; do
+      echo "Point In Time Recovery In Progress. Waiting for $RECOVERY_DONE_FILE file"
+      if [[ -e "$RECOVERY_DONE_FILE" ]]; then
+        echo "$RECOVERY_DONE_FILE found."
+      fi
+      sleep 2
+    done
+fi
+
+if [[ -e "$RECOVERY_DONE_FILE" ]]; then
+  rm $RECOVERY_DONE_FILE
+fi
 
 #going to change this with the check of process id
 rm -f "$PGDATA"/postmaster.pid
