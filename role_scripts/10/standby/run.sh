@@ -130,6 +130,8 @@ echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 if [ "$STANDBY" == "hot" ]; then
     echo "hot_standby = on" >>/tmp/postgresql.conf
+else
+    echo "hot_standby = off" >>/tmp/postgresql.conf
 fi
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
