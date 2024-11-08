@@ -238,8 +238,9 @@ mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 touch /tmp/postgresql.conf
 if [ "$STANDBY" == "hot" ]; then
     echo "hot_standby = on" >>/tmp/postgresql.conf
+else
+    echo "hot_standby = off" >>/tmp/postgresql.conf
 fi
-
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
     echo "synchronous_commit = remote_write" >>/tmp/postgresql.conf

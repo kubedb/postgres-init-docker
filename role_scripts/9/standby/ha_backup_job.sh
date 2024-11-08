@@ -94,6 +94,8 @@ echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 
 if [ "$STANDBY" == "hot" ]; then
     echo "hot_standby = on" >>/tmp/postgresql.conf
+else
+    echo "hot_standby = off" >>/tmp/postgresql.conf
 fi
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
