@@ -8,6 +8,16 @@ trap \
     "{ STOP=true; }" \
     SIGINT SIGTERM EXIT
 
+if [[ "$PAUSE_RUN_SCRIPT" == "true" ]]; then
+  while true; do
+    sleep 2
+    echo "Run script is paused by db owner. Waiting for file /var/pv/resume_run_script to resume"
+    if [[ -e "/var/pv/resume_run_script" ]];then
+      break 
+    fi
+  done
+fi
+
 if [[ "$PITR_RESTORE" == "true" ]]; then
     while true; do
       sleep 2
