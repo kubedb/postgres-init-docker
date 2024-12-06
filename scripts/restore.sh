@@ -1,11 +1,14 @@
 #!/bin/bash
 
+INSIDE="false"
+IN_MIDDLE_OF_BB="false"
 DONE_FILE="var/pv/done.txt"
 LOG_DIR="$PGDATA"/log
-PATTERN1="recovery stopping before commit of transaction"
+PATTERN1="recovery stopping"
 PATTERN2="pausing at the end of recovery"
 PATTERN3="Execute pg_wal_replay_resume()"
 PATTERN4="recovery has paused"
+PATTERN5="requested recovery stop point is before consistent recovery point"
 LOG_FILE_PATTERN="postgresql-*.log"
 RECOVERY_FILE="$PGDATA"/recovery.signal
 mkdir -p $PGDATA
@@ -20,7 +23,11 @@ if [[ "${WALG_BASE_BACKUP_NAME:-0}" != "0" ]]; then
 fi
 
 # check postgresql veriosn
-
+if [[ "$PITR_LSN" != "" ]]; then
+  echo "Trying to restore upto lsn: $PITR_LSN commit-time: $PITR_TIME"
+else
+  echo "Trying to restore in time: "$PITR_TIME
+fi
 
 if [[ "$PG_MAJOR" == "11" ]]; then
     RECOVERY_FILE="$PGDATA"/recovery.conf
@@ -52,7 +59,11 @@ else
     touch /tmp/postgresql.conf
     echo "restore_command = 'wal-g wal-fetch %f %p'" >>/tmp/postgresql.conf
     if [[ "${PITR_TIME:-0}" != "latest" ]]; then
+      if [[ "$PITR_LSN" != "" ]]; then
+        echo "recovery_target_lsn = '$PITR_LSN'" >>/tmp/postgresql.conf
+      else
         echo "recovery_target_time = '$PITR_TIME'" >>/tmp/postgresql.conf
+      fi
     else
         echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
     fi
@@ -67,7 +78,6 @@ else
     fi
     echo "hot_standby = on" >>/tmp/postgresql.conf
     echo "wal_log_hints = on" >>/tmp/postgresql.conf
-
 fi
 
 # ****************** Recovery config 12 **************************
@@ -93,6 +103,7 @@ sleep 10
 #  | [[ ! -e /var/pv/data/restore.done]]
 while [[ -e "$RECOVERY_FILE" && -e /var/pv/data/postmaster.pid ]]; do
     echo "restoring..."
+    INSIDE="true"
     cluster_state=$(pg_controldata | grep "Database cluster state" | awk '{print $4, $5}')
     if [[ $cluster_state == "in production" ]]; then
         rm -rf "$RECOVERY_FILE"
@@ -111,7 +122,6 @@ while [[ -e "$RECOVERY_FILE" && -e /var/pv/data/postmaster.pid ]]; do
     sleep 1
 done
 
-
 sleep 8
 # Find and output all log files matching the pattern
 for log_file in "$LOG_DIR"/$LOG_FILE_PATTERN; do
@@ -119,10 +129,18 @@ for log_file in "$LOG_DIR"/$LOG_FILE_PATTERN; do
     echo "Outputting contents of: $log_file"
     cat "$log_file"
     echo "---------------------------------------"
+    if grep -rq "$PATTERN5" "$log_file"; then
+      IN_MIDDLE_OF_BB="true"
+    fi
 done
 
+if [[ "$IN_MIDDLE_OF_BB" != "false" ]];then
+  echo "PITR Restore timestamp might fall in between a base backup."
+  echo "Consider choosing a point that do not lies in between a base backup."
+  echo "Hints: decrease the PITR time or increase it in case you have another base backup taken after current PITR time"
+fi
 
-if [[ ! -e "$RECOVERY_FILE" ]]; then
+if [[ ! -e "$RECOVERY_FILE" && "$INSIDE" == "true" ]]; then
     echo "database successfully recovered...."
     exit 0
 else
