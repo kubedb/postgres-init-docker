@@ -24,7 +24,7 @@ echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must 
 if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
     echo "${WAL_RETAIN_PARAM}=${WAL_RETAIN_AMOUNT}" >>/tmp/postgresql.conf
 else
-  echo "wal_keep_size = 2560" >>/tmp/postgresql.conf
+    echo "wal_keep_size = 2560" >>/tmp/postgresql.conf
 fi
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
@@ -53,8 +53,6 @@ fi
 if [[ "$CLIENT_AUTH_MODE" == "scram" ]]; then
     echo "password_encryption = scram-sha-256" >>/tmp/postgresql.conf
 fi
-
-
 
 # ****************** Recovery config **************************
 echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf

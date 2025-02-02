@@ -67,11 +67,11 @@ echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must 
 if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
     echo "${WAL_RETAIN_PARAM}=${WAL_RETAIN_AMOUNT}" >>/tmp/postgresql.conf
 else
-  echo "wal_keep_size = 2560" >>/tmp/postgresql.conf
+    echo "wal_keep_size = 2560" >>/tmp/postgresql.conf
 fi
 if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
-  CLEAN_HOSTNAME="${HOSTNAME//[^[:alnum:]]/}"
-  echo "primary_slot_name="$CLEAN_HOSTNAME"" >>/tmp/postgresql.conf
+    CLEAN_HOSTNAME="${HOSTNAME//[^[:alnum:]]/}"
+    echo "primary_slot_name="$CLEAN_HOSTNAME"" >>/tmp/postgresql.conf
 fi
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 echo "wal_log_hints = on" >>/tmp/postgresql.conf

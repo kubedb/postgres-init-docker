@@ -24,7 +24,7 @@ echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must 
 if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
     echo "${WAL_RETAIN_PARAM}=${WAL_RETAIN_AMOUNT}" >>/tmp/postgresql.conf
 else
-  echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
+    echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
 fi
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
 echo "archive_mode = always" >>/tmp/postgresql.conf

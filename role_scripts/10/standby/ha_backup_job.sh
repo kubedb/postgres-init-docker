@@ -81,7 +81,7 @@ echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must 
 if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
     echo "${WAL_RETAIN_PARAM}=${WAL_RETAIN_AMOUNT}" >>/tmp/postgresql.conf
 else
-  echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
+    echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
 fi
 
 echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf

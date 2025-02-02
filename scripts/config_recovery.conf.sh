@@ -7,8 +7,8 @@ echo "trigger_file = '/run_scripts/tmp/pg-failover-trigger'" >>/tmp/recovery.con
 echo "recovery_target_timeline = 'latest'" >>/tmp/recovery.conf
 
 if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
-  CLEAN_HOSTNAME="${HOSTNAME//[^[:alnum:]]/}"
-  echo "primary_slot_name = "$CLEAN_HOSTNAME"" >>/tmp/recovery.conf
+    CLEAN_HOSTNAME="${HOSTNAME//[^[:alnum:]]/}"
+    echo "primary_slot_name = "$CLEAN_HOSTNAME"" >>/tmp/recovery.conf
 fi
 # primary_conninfo is used for streaming replication
 if [[ "${SSL:-0}" == "ON" ]]; then

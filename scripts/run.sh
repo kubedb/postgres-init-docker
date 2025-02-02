@@ -10,12 +10,12 @@ trap \
 
 if [[ "$PITR_RESTORE" == "true" ]]; then
     while true; do
-      sleep 2
-      echo "Point In Time Recovery In Progress. Waiting for $RECOVERY_DONE_FILE file"
-      if [[ -e "$RECOVERY_DONE_FILE" ]]; then
-        echo "$RECOVERY_DONE_FILE found."
-        break
-      fi
+        sleep 2
+        echo "Point In Time Recovery In Progress. Waiting for $RECOVERY_DONE_FILE file"
+        if [[ -e "$RECOVERY_DONE_FILE" ]]; then
+            echo "$RECOVERY_DONE_FILE found."
+            break
+        fi
     done
 fi
 
@@ -23,19 +23,19 @@ fi
 rm -f "$PGDATA"/postmaster.pid
 echo "waiting for the role to be decided ..."
 while true; do
-    if [[ -d $PGDATA ]];then
-      DIR="$PGDATA"
-      CURRENT_PERMS=$(stat -c "%a" "$DIR")
-      if [ "$CURRENT_PERMS" -gt 700 ]; then
-          echo "Permissions are greater than 0700. Updating to 0700."
-          chmod 0700 "$DIR"
-      fi
+    if [[ -d $PGDATA ]]; then
+        DIR="$PGDATA"
+        CURRENT_PERMS=$(stat -c "%a" "$DIR")
+        if [ "$CURRENT_PERMS" -gt 700 ]; then
+            echo "Permissions are greater than 0700. Updating to 0700."
+            chmod 0700 "$DIR"
+        fi
     fi
 
-    if [[ "$ARCHIVER_ENABLED" == "true" && ! -d "$ARCHIVE_STATUS_PATH" && "$ARCHIVE_STATUS_PATH" != "" ]];then
-      mkdir -m 0750 -p "$ARCHIVE_PATH"
-      mkdir -m 0750 -p "$ARCHIVE_STATUS_PATH"
-      mkdir -m 0750 -p "$LAST_ARCHIVED_FILE_INFO_DIR"
+    if [[ "$ARCHIVER_ENABLED" == "true" && ! -d "$ARCHIVE_STATUS_PATH" && "$ARCHIVE_STATUS_PATH" != "" ]]; then
+        mkdir -m 0750 -p "$ARCHIVE_PATH"
+        mkdir -m 0750 -p "$ARCHIVE_STATUS_PATH"
+        mkdir -m 0750 -p "$LAST_ARCHIVED_FILE_INFO_DIR"
     fi
 
     if [[ -e /run_scripts/role/run.sh ]] && [[ "$STOP" = false ]]; then
