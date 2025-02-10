@@ -142,6 +142,7 @@ fi
 
 if [[ ! -e "$RECOVERY_FILE" && "$INSIDE" == "true" ]]; then
     echo "database successfully recovered...."
+    pg_ctl stop -D "$PGDATA" -w >/dev/null 2>&1 || echo "Warning: PostgreSQL stop command failed but ignoring..."
     exit 0
 else
     exit 1
