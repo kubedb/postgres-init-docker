@@ -17,7 +17,7 @@
 set -e
 
 echo "Running as Primary"
-
+BOOTSTRAP="false"
 # set password ENV
 export PGPASSWORD=${POSTGRES_PASSWORD:-postgres}
 
@@ -29,7 +29,8 @@ if [ ! -e "$PGDATA/PG_VERSION" ]; then
     rm -rf "$PGDATA"/*
     chmod 0700 "$PGDATA"
     /scripts/initdb.sh
+    BOOTSTRAP="true"
 
 fi
-/run_scripts/role/start.sh
+/run_scripts/role/start.sh $BOOTSTRAP
 exec postgres

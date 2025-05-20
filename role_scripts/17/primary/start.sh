@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+BOOTSTRAP=${1}
+
 # setup postgresql.conf
 touch /tmp/postgresql.conf
 echo "wal_level = replica" >>/tmp/postgresql.conf
@@ -111,27 +113,29 @@ echo
 psql+=(--username "$POSTGRES_USER" --dbname "$POSTGRES_DB")
 echo
 
-# initialize database
-for f in "$INITDB"/*; do
-    case "$f" in
-        *.sh)
-            echo "$0: running $f"
-            . "$f"
-            ;;
-        *.sql)
-            echo "$0: running $f"
-            "${psql[@]}" -f "$f"
-            echo
-            ;;
-        *.sql.gz)
-            echo "$0: running $f"
-            gunzip -c "$f" | "${psql[@]}"
-            echo
-            ;;
-        *) echo "$0: ignoring $f" ;;
-    esac
-    echo
-done
+if [[ "$BOOTSTRAP" == "true" ]];then
+  # initialize database
+  for f in "$INITDB"/*; do
+      case "$f" in
+          *.sh)
+              echo "$0: running $f"
+              . "$f"
+              ;;
+          *.sql)
+              echo "$0: running $f"
+              "${psql[@]}" -f "$f"
+              echo
+              ;;
+          *.sql.gz)
+              echo "$0: running $f"
+              gunzip -c "$f" | "${psql[@]}"
+              echo
+              ;;
+          *) echo "$0: ignoring $f" ;;
+      esac
+      echo
+  done
+fi
 
 # stop server
 pg_ctl promote

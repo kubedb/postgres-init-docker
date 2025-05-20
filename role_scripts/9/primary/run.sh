@@ -15,7 +15,7 @@
 # limitations under the License.
 
 set -e
-
+BOOTSTRAP="false"
 echo "Running as Primary"
 
 # set password ENV
@@ -29,7 +29,8 @@ if [ ! -e "$PGDATA/PG_VERSION" ]; then
     rm -rf "$PGDATA"/*
     chmod 0700 "$PGDATA"
     /scripts/initdb.sh
+    BOOTSTRAP="true"
 
 fi
-/run_scripts/role/start.sh
+/run_scripts/role/start.sh $BOOTSTRAP
 exec postgres
