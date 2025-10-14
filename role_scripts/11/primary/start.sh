@@ -29,6 +29,7 @@ fi
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
 echo "archive_mode = always" >>/tmp/postgresql.conf
+echo "log_statement = ddl" >>/tmp/postgresql.conf
 
 if [[ "${WAL_BACKUP_TYPE:-0}" == "WALG" ]]; then
     echo "archive_command = 'cp %p /var/pv/wal_archive/%f'" >>/tmp/postgresql.conf

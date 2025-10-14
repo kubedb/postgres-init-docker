@@ -30,6 +30,7 @@ else
 fi
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
+echo "log_statement = ddl" >>/tmp/postgresql.conf
 
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf

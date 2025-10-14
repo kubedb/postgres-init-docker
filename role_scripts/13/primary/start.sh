@@ -28,6 +28,7 @@ else
 fi
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
+echo "log_statement = ddl" >>/tmp/postgresql.conf
 
 # we are not doing any archiving by default but it's better to have this config in our postgresql.conf file in case of customization.
 echo "archive_mode = always" >>/tmp/postgresql.conf

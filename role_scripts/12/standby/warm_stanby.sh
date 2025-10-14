@@ -41,6 +41,7 @@ if [[ "${WAL_BACKUP_TYPE:-0}" == "WALG" ]]; then
 else
     echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 fi
+echo "log_statement = ddl" >>/tmp/postgresql.conf
 
 echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
 

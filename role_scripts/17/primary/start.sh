@@ -28,6 +28,7 @@ if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
 else
   echo "wal_keep_size = 2560" >>/tmp/postgresql.conf
 fi
+echo "log_statement = ddl" >>/tmp/postgresql.conf
 
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
