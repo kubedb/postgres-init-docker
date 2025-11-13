@@ -197,3 +197,4 @@ fi
 
 # ref: https://superuser.com/a/246841/985093
 cat /tmp/postgresql.conf $PGDATA/postgresql.conf >"/tmp/postgresql.conf.tmp" && mv "/tmp/postgresql.conf.tmp" "$PGDATA/postgresql.conf"
+

@@ -89,16 +89,19 @@ if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
   done
 fi
 
+
 if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
+    touch /var/pv/BOOTSTRAP_INITIALIZATION_STARTED
     echo "take base basebackup..."
     mkdir -p "$PGDATA"
     rm -rf "$PGDATA"/*
     chmod 0700 "$PGDATA"
     if [[ "${SSL:-0}" == "ON" ]]; then
-        pg_basebackup -X fetch --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
+        pg_basebackup -Xs -c fast --pgdata "$PGDATA" --max-rate=1024M --username=postgres --progress --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
     else
-        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST"
+        pg_basebackup -Xs -c fast --no-password --max-rate=1024M --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST"
     fi
+    touch /var/pv/data/standby.signal
 else
     /run_scripts/role/warm_stanby.sh
 fi
@@ -289,5 +292,9 @@ else
 fi
 
 mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
+
+if [[ -e /var/pv/BOOTSTRAP_INITIALIZATION_STARTED ]]; then
+  rm /var/pv/BOOTSTRAP_INITIALIZATION_STARTED
+fi
 
 exec postgres

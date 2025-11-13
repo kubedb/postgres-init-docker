@@ -42,8 +42,10 @@ while true; do
         echo "running the initial script ..."
         if [[ $REMOTE_REPLICA == "true" ]]; then
             /run_scripts/role/remote-replica.sh
-        else
+        elif [[ ! -f "/var/split-brain/SPLIT_BRAIN" ]]; then
             /run_scripts/role/run.sh
+        elif [[ -f "/var/split-brain/SPLIT_BRAIN" ]]; then
+            echo "Split brain detected. Not starting the database server."
         fi
 
         if [[ $STANDALONE == "false" ]]; then
