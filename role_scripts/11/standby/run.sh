@@ -277,4 +277,12 @@ fi
 
 mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 
+if [[ -e /var/pv/BOOTSTRAP_INITIALIZATION_STARTED ]]; then
+  rm /var/pv/BOOTSTRAP_INITIALIZATION_STARTED
+fi
+
+if [[ -e /var/pv/data/postgresql.conf ]]; then
+  cp /var/pv/data/postgresql.conf /var/pv/postgresql.conf
+fi
+
 exec postgres
