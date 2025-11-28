@@ -90,11 +90,11 @@ mv /tmp/postgresql.conf "$PGDATA/postgresql.conf"
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 # setup pg_hba.conf for initial start. this one is just for initialization
 touch /tmp/pg_hba.conf
-{ echo '#TYPE      DATABASE        USER            ADDRESS                 METHOD'; } >>tmp/pg_hba.conf
-{ echo '# "local" is for Unix domain socket connections only'; } >>tmp/pg_hba.conf
-{ echo 'local      all             all                                     trust'; } >>tmp/pg_hba.conf
-{ echo '# IPv4 local connections:'; } >>tmp/pg_hba.conf
-{ echo 'host         all             all             127.0.0.1/32            trust'; } >>tmp/pg_hba.conf
+{ echo '#TYPE      DATABASE        USER            ADDRESS                 METHOD'; } >>/tmp/pg_hba.conf
+{ echo '# "local" is for Unix domain socket connections only'; } >>/tmp/pg_hba.conf
+{ echo 'local      all             all                                     trust'; } >>/tmp/pg_hba.conf
+{ echo '# IPv4 local connections:'; } >>/tmp/pg_hba.conf
+{ echo 'host         all             all             127.0.0.1/32            trust'; } >>/tmp/pg_hba.conf
 mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 
 # start postgres
