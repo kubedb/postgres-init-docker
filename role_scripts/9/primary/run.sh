@@ -25,21 +25,23 @@ export PGWAL="$PGDATA/pg_xlog"
 
 export ARCHIVE=${ARCHIVE:-}
 if [ ! -e "$PGDATA/PG_VERSION" ]; then
-    pv_df_output=$(df -hP 2>&1)
-    # Fail if kernel reports a broken FUSE mount anywhere
-    if echo "$pv_df_output" | grep -qi "Transport endpoint is not connected"; then
-        echo "ERROR: /var/pv mount not healthy (Transport endpoint is not connected)."
-        exit 1
-    fi
-    # Ensure /var/pv is actually mounted (present in df output)
-    if ! echo "$pv_df_output" | awk '{print $NF}' | grep -qx "/var/pv"; then
-        echo "ERROR: /var/pv is not mounted (not listed in df)."
-        exit 1
-    fi
-    # Ensure the mountpoint is accessible
-    if ! ls /var/pv >/dev/null 2>&1; then
-        echo "ERROR: /var/pv is not accessible."
-        exit 1
+    if [[ ! -e "/var/pv/IGNORE_FILESYSTEM_MOUNT_CHECK" ]]; then
+      pv_df_output=$(df -hP 2>&1)
+      # Fail if kernel reports a broken FUSE mount anywhere
+      if echo "$pv_df_output" | grep -qi "Transport endpoint is not connected"; then
+          echo "ERROR: /var/pv mount not healthy (Transport endpoint is not connected)."
+          exit 1
+      fi
+      # Ensure /var/pv is actually mounted (present in df output)
+      if ! echo "$pv_df_output" | awk '{print $NF}' | grep -qx "/var/pv"; then
+          echo "ERROR: /var/pv is not mounted (not listed in df)."
+          exit 1
+      fi
+      # Ensure the mountpoint is accessible
+      if ! ls /var/pv >/dev/null 2>&1; then
+          echo "ERROR: /var/pv is not accessible."
+          exit 1
+      fi
     fi
     mkdir -p "$PGDATA"
     rm -rf "$PGDATA"/*
