@@ -23,6 +23,8 @@ fi
 rm -f "$PGDATA"/postmaster.pid
 echo "waiting for the role to be decided ..."
 while true; do
+  # Robust /var/pv mount availability check before any destructive operation or basebackup
+
     if [[ -d $PGDATA ]];then
       DIR="$PGDATA"
       CURRENT_PERMS=$(stat -c "%a" "$DIR")
@@ -42,8 +44,10 @@ while true; do
         echo "running the initial script ..."
         if [[ $REMOTE_REPLICA == "true" ]]; then
             /run_scripts/role/remote-replica.sh
-        else
+        elif [[ ! -f "/var/split-brain/SPLIT_BRAIN" ]]; then
             /run_scripts/role/run.sh
+        elif [[ -f "/var/split-brain/SPLIT_BRAIN" ]]; then
+            echo "Split brain detected. Not starting the database server."
         fi
 
         if [[ $STANDALONE == "false" ]]; then
