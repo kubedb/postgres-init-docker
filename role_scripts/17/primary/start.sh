@@ -20,7 +20,7 @@ BOOTSTRAP=${1}
 touch /tmp/postgresql.conf
 
 if [[ "${TUNING_ENABLED:-}" == "true" ]]; then
-  echo "include_if_exists = '${TUNING_FILE_PATH:-/etc/tune/user.conf}'" >>/tmp/postgresql.conf
+    echo "include_if_exists = '${TUNING_FILE_PATH:-/etc/tune/user.conf}'" >>/tmp/postgresql.conf
 fi
 
 echo "wal_level = replica" >>/tmp/postgresql.conf
@@ -31,7 +31,7 @@ echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must 
 if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
     echo "${WAL_RETAIN_PARAM}=${WAL_RETAIN_AMOUNT}" >>/tmp/postgresql.conf
 else
-  echo "wal_keep_size = 2560" >>/tmp/postgresql.conf
+    echo "wal_keep_size = 2560" >>/tmp/postgresql.conf
 fi
 
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
@@ -118,28 +118,28 @@ echo
 psql+=(--username "$POSTGRES_USER" --dbname "$POSTGRES_DB")
 echo
 
-if [[ "$BOOTSTRAP" == "true" ]];then
-  # initialize database
-  for f in "$INITDB"/*; do
-      case "$f" in
-          *.sh)
-              echo "$0: running $f"
-              . "$f"
-              ;;
-          *.sql)
-              echo "$0: running $f"
-              "${psql[@]}" -f "$f"
-              echo
-              ;;
-          *.sql.gz)
-              echo "$0: running $f"
-              gunzip -c "$f" | "${psql[@]}"
-              echo
-              ;;
-          *) echo "$0: ignoring $f" ;;
-      esac
-      echo
-  done
+if [[ "$BOOTSTRAP" == "true" ]]; then
+    # initialize database
+    for f in "$INITDB"/*; do
+        case "$f" in
+            *.sh)
+                echo "$0: running $f"
+                . "$f"
+                ;;
+            *.sql)
+                echo "$0: running $f"
+                "${psql[@]}" -f "$f"
+                echo
+                ;;
+            *.sql.gz)
+                echo "$0: running $f"
+                gunzip -c "$f" | "${psql[@]}"
+                echo
+                ;;
+            *) echo "$0: ignoring $f" ;;
+        esac
+        echo
+    done
 fi
 
 # stop server

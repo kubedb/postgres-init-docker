@@ -24,9 +24,9 @@ fi
 
 # check postgresql veriosn
 if [[ "$PITR_LSN" != "" ]]; then
-  echo "Trying to restore upto lsn: $PITR_LSN commit-time: $PITR_TIME"
+    echo "Trying to restore upto lsn: $PITR_LSN commit-time: $PITR_TIME"
 else
-  echo "Trying to restore in time: "$PITR_TIME
+    echo "Trying to restore in time: "$PITR_TIME
 fi
 
 if [[ "$PG_MAJOR" == "11" ]]; then
@@ -59,11 +59,11 @@ else
     touch /tmp/postgresql.conf
     echo "restore_command = 'wal-g wal-fetch %f %p'" >>/tmp/postgresql.conf
     if [[ "${PITR_TIME:-0}" != "latest" ]]; then
-      if [[ "$PITR_LSN" != "" ]]; then
-        echo "recovery_target_lsn = '$PITR_LSN'" >>/tmp/postgresql.conf
-      else
-        echo "recovery_target_time = '$PITR_TIME'" >>/tmp/postgresql.conf
-      fi
+        if [[ "$PITR_LSN" != "" ]]; then
+            echo "recovery_target_lsn = '$PITR_LSN'" >>/tmp/postgresql.conf
+        else
+            echo "recovery_target_time = '$PITR_TIME'" >>/tmp/postgresql.conf
+        fi
     else
         echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
     fi
@@ -72,9 +72,9 @@ else
     echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
 
     if [[ "$PG_MAJOR" == "12" ]]; then
-      echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
+        echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
     else
-      echo "wal_keep_size = 2560" >>/tmp/postgresql.conf
+        echo "wal_keep_size = 2560" >>/tmp/postgresql.conf
     fi
     echo "hot_standby = on" >>/tmp/postgresql.conf
     echo "wal_log_hints = on" >>/tmp/postgresql.conf
@@ -109,7 +109,7 @@ while [[ -e "$RECOVERY_FILE" && -e /var/pv/data/postmaster.pid ]]; do
         rm -rf "$RECOVERY_FILE"
     fi
 
-    if grep -rq "$PATTERN1" "$LOG_DIR" && (grep -rq "$PATTERN2" "$LOG_DIR" ||  grep -rq "$PATTERN4" "$LOG_DIR") && grep -rq "$PATTERN3" "$LOG_DIR"; then
+    if grep -rq "$PATTERN1" "$LOG_DIR" && (grep -rq "$PATTERN2" "$LOG_DIR" || grep -rq "$PATTERN4" "$LOG_DIR") && grep -rq "$PATTERN3" "$LOG_DIR"; then
         echo "Recovery was paused."
         rm -rf "$RECOVERY_FILE"
     fi
@@ -130,14 +130,14 @@ for log_file in "$LOG_DIR"/$LOG_FILE_PATTERN; do
     cat "$log_file"
     echo "---------------------------------------"
     if grep -rq "$PATTERN5" "$log_file"; then
-      IN_MIDDLE_OF_BB="true"
+        IN_MIDDLE_OF_BB="true"
     fi
 done
 
-if [[ "$IN_MIDDLE_OF_BB" != "false" ]];then
-  echo "PITR Restore timestamp might fall in between a base backup."
-  echo "Consider choosing a point that do not lies in between a base backup."
-  echo "Hints: decrease the PITR time or increase it in case you have another base backup taken after current PITR time"
+if [[ "$IN_MIDDLE_OF_BB" != "false" ]]; then
+    echo "PITR Restore timestamp might fall in between a base backup."
+    echo "Consider choosing a point that do not lies in between a base backup."
+    echo "Hints: decrease the PITR time or increase it in case you have another base backup taken after current PITR time"
 fi
 
 if [[ ! -e "$RECOVERY_FILE" && "$INSIDE" == "true" ]]; then

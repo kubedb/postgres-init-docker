@@ -67,48 +67,48 @@ while true; do
 done
 
 if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
-  CLEAN_HOSTNAME="${HOSTNAME//[^[:alnum:]]/}"
-  while true; do
-      echo "Create replication slot on primary"
-      if [[ "${SSL:-0}" == "ON" ]]; then
-          output=$(psql -h "$PRIMARY_HOST" --username=postgres "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --command="SELECT pg_create_physical_replication_slot('${CLEAN_HOSTNAME}', true);" 2>&1 || true)
-      else
-          output=$(psql -h "$PRIMARY_HOST" --username=postgres --no-password --command="SELECT pg_create_physical_replication_slot('${CLEAN_HOSTNAME}', true);" 2>&1 || true)
-      fi
-      # check if current pod became leader itself
+    CLEAN_HOSTNAME="${HOSTNAME//[^[:alnum:]]/}"
+    while true; do
+        echo "Create replication slot on primary"
+        if [[ "${SSL:-0}" == "ON" ]]; then
+            output=$(psql -h "$PRIMARY_HOST" --username=postgres "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key" --command="SELECT pg_create_physical_replication_slot('${CLEAN_HOSTNAME}', true);" 2>&1 || true)
+        else
+            output=$(psql -h "$PRIMARY_HOST" --username=postgres --no-password --command="SELECT pg_create_physical_replication_slot('${CLEAN_HOSTNAME}', true);" 2>&1 || true)
+        fi
+        # check if current pod became leader itself
 
-      if [[ $output == *"(1 row)"* || $output == *"already exists"* ]]; then
-        break
-      fi
+        if [[ $output == *"(1 row)"* || $output == *"already exists"* ]]; then
+            break
+        fi
 
-      if [[ -e "/run_scripts/tmp/pg-failover-trigger" ]]; then
-          echo "Postgres promotion trigger_file found. Running primary run script"
-          /run_scripts/role/run.sh
-      fi
-      sleep 2
-  done
+        if [[ -e "/run_scripts/tmp/pg-failover-trigger" ]]; then
+            echo "Postgres promotion trigger_file found. Running primary run script"
+            /run_scripts/role/run.sh
+        fi
+        sleep 2
+    done
 fi
 
 if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     if [[ ! -e "/var/pv/IGNORE_FILESYSTEM_MOUNT_CHECK" ]]; then
-      # Robust /var/pv mount availability check before any destructive operation or basebackup
-      pv_df_output=$(df -hP 2>&1)
-      # Fail if kernel reports a broken FUSE mount anywhere
-      if echo "$pv_df_output" | grep -qi "Transport endpoint is not connected"; then
-          echo "ERROR: /var/pv mount not healthy (Transport endpoint is not connected). Aborting basebackup."
-          exit 1
-      fi
-      # Ensure /var/pv is actually mounted (present in df output)
-      if ! echo "$pv_df_output" | awk '{print $NF}' | grep -qx "/var/pv"; then
-          echo "ERROR: /var/pv is not mounted (not listed in df). Aborting basebackup."
-          echo "$pv_df_output"
-          exit 1
-      fi
-      # Ensure the mountpoint is accessible
-      if ! ls /var/pv >/dev/null 2>&1; then
-          echo "ERROR: /var/pv is not accessible. Aborting basebackup."
-          exit 1
-      fi
+        # Robust /var/pv mount availability check before any destructive operation or basebackup
+        pv_df_output=$(df -hP 2>&1)
+        # Fail if kernel reports a broken FUSE mount anywhere
+        if echo "$pv_df_output" | grep -qi "Transport endpoint is not connected"; then
+            echo "ERROR: /var/pv mount not healthy (Transport endpoint is not connected). Aborting basebackup."
+            exit 1
+        fi
+        # Ensure /var/pv is actually mounted (present in df output)
+        if ! echo "$pv_df_output" | awk '{print $NF}' | grep -qx "/var/pv"; then
+            echo "ERROR: /var/pv is not mounted (not listed in df). Aborting basebackup."
+            echo "$pv_df_output"
+            exit 1
+        fi
+        # Ensure the mountpoint is accessible
+        if ! ls /var/pv >/dev/null 2>&1; then
+            echo "ERROR: /var/pv is not accessible. Aborting basebackup."
+            exit 1
+        fi
     fi
 
     touch /var/pv/BOOTSTRAP_INITIALIZATION_STARTED
@@ -140,7 +140,7 @@ echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must 
 if [ ! -z "${WAL_RETAIN_PARAM:-}" ] && [ ! -z "${WAL_RETAIN_AMOUNT:-}" ]; then
     echo "${WAL_RETAIN_PARAM}=${WAL_RETAIN_AMOUNT}" >>/tmp/postgresql.conf
 else
-  echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
+    echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
 fi
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
