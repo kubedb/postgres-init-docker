@@ -19,7 +19,7 @@ BOOTSTRAP=${1}
 touch /tmp/postgresql.conf
 
 if [[ "${TUNING_ENABLED:-}" == "true" ]]; then
-  echo "include_if_exists = '${TUNING_FILE_PATH:-/etc/tune/user.conf}'" >>/tmp/postgresql.conf
+  echo "include_if_exists = '${TUNING_FILE_PATH:-/etc/config/pgtune.conf}'" >>/tmp/postgresql.conf
 fi
 
 echo "wal_level = replica" >>/tmp/postgresql.conf
