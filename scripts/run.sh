@@ -50,7 +50,7 @@ while true; do
             echo "Split brain detected. Not starting the database server."
         fi
 
-        if [[ $STANDALONE == "false" ]]; then
+        if [[ "$STANDALONE" != "true" ]]; then
             echo "removing the initial scripts as server is not running ..."
             rm -rf /run_scripts/*
         fi
