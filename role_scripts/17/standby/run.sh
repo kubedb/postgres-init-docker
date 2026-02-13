@@ -176,6 +176,7 @@ if [[ "$STREAMING" == "synchronous" ]]; then
     shopt -s extglob
     sts_prefix=${HOSTNAME%%+([0-9])}
     names=""
+    # this needs to be changed for read replicas
     for ((i = 0; i < $REPLICAS; i++)); do
         if [[ $self_idx == $i ]]; then
             echo "skip $i"
