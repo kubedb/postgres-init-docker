@@ -49,6 +49,10 @@ else
     fi
 fi
 
+if [[ "$MAJOR_PG_VERSION" == "18" ]];then
+    export POSTGRES_INITDB_ARGS="$POSTGRES_INITDB_ARGS --no-data-checksums"
+fi
+
 distro=$(grep '^ID' /etc/os-release)
 distro=${distro#"ID="}
 if [[ "$distro" == "debian" ]]; then
