@@ -108,6 +108,9 @@ else
     op="CREATE"
 fi
 
+if [[ -f "/var/pv/data/standby.signal" ]];then
+  rm /var/pv/data/standby.signal
+fi
 # alter postgres superuser
 "${psql[@]}" --username postgres <<-EOSQL
     $op USER "$POSTGRES_USER" WITH SUPERUSER PASSWORD '$POSTGRES_PASSWORD';
