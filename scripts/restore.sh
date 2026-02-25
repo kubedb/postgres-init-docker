@@ -1,16 +1,8 @@
 #!/bin/bash
 
-INSIDE="false"
-IN_MIDDLE_OF_BB="false"
-DONE_FILE="var/pv/done.txt"
 LOG_DIR="$PGDATA"/log
-PATTERN1="recovery stopping"
-PATTERN2="pausing at the end of recovery"
-PATTERN3="Execute pg_wal_replay_resume()"
-PATTERN4="recovery has paused"
-PATTERN5="requested recovery stop point is before consistent recovery point"
 LOG_FILE_PATTERN="postgresql-*.log"
-RECOVERY_FILE="$PGDATA"/recovery.signal
+HOST=$(hostname)
 mkdir -p $PGDATA
 chmod 0700 "$PGDATA"
 
@@ -30,7 +22,6 @@ else
 fi
 
 if [[ "$PG_MAJOR" == "11" ]]; then
-    RECOVERY_FILE="$PGDATA"/recovery.conf
     # ****************** Recovery config 11 **************************
     touch /tmp/recovery.conf
     echo "restore_command = 'wal-g wal-fetch %f %p'" >>/tmp/recovery.conf
@@ -41,7 +32,11 @@ if [[ "$PG_MAJOR" == "11" ]]; then
     else
         echo "recovery_target_timeline = 'latest'" >>/tmp/recovery.conf
     fi
-    echo "recovery_target_action = 'pause'" >>/tmp/recovery.conf
+    if [[ "$HOST" =~ -0$ ]]; then
+      echo "recovery_target_action = 'promote'" >>/tmp/recovery.conf
+    else
+      echo "recovery_target_action = 'pause'" >>/tmp/recovery.conf
+    fi
     mv /tmp/recovery.conf "$PGDATA/recovery.conf"
 
     # setup postgresql.conf
@@ -67,7 +62,11 @@ else
     else
         echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
     fi
-    echo "recovery_target_action = 'pause'" >>/tmp/postgresql.conf
+    if [[ "$HOST" =~ -0$ ]]; then
+      echo "recovery_target_action = 'promote'" >>/tmp/postgresql.conf
+    else
+      echo "recovery_target_action = 'pause'" >>/tmp/postgresql.conf
+    fi
     echo "wal_level = replica" >>/tmp/postgresql.conf
     echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
 
@@ -98,52 +97,56 @@ touch /tmp/pg_hba.conf
 mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 
 # start postgres
-pg_ctl -D "$PGDATA" -w start &
-sleep 10
-#  | [[ ! -e /var/pv/data/restore.done]]
-while [[ -e "$RECOVERY_FILE" && -e /var/pv/data/postmaster.pid ]]; do
-    echo "restoring..."
-    INSIDE="true"
-    cluster_state=$(pg_controldata | grep "Database cluster state" | awk '{print $4, $5}')
-    if [[ $cluster_state == "in production" ]]; then
-        rm -rf "$RECOVERY_FILE"
-    fi
+pg_ctl -D "$PGDATA" -w start
 
-    if grep -rq "$PATTERN1" "$LOG_DIR" && (grep -rq "$PATTERN2" "$LOG_DIR" ||  grep -rq "$PATTERN4" "$LOG_DIR") && grep -rq "$PATTERN3" "$LOG_DIR"; then
-        echo "Recovery was paused."
-        rm -rf "$RECOVERY_FILE"
-    fi
-
-    if [[ -e "$DONE_FILE" ]]; then
-        echo "Recovery was Stopped in the presence of $DONE_FILE file."
-        rm -rf "$RECOVERY_FILE"
-    fi
-
-    sleep 1
+until pg_isready -U postgres; do
+  echo "Waiting for pg_isready"
+  sleep 3
+  if [[ ! -f "$PGDATA/postmaster.pid" ]];then
+    pg_ctl -D "$PGDATA" -w start
+    for log_file in "$LOG_DIR"/$LOG_FILE_PATTERN; do
+        cat "$log_file"
+        echo "---------------------------------------"
+        echo "---------------------------------------"
+    done
+  fi
 done
 
-sleep 8
+
+if [[ "$HOST" =~ -0$ ]]; then
+  echo "Primary restore mode"
+
+  while true; do
+    IN_RECOVERY=$(psql -U postgres -Atqc "SELECT pg_is_in_recovery();")
+
+    if [[ "$IN_RECOVERY" == "f" ]]; then
+      echo "Promotion completed"
+      break
+    fi
+    echo "primary not promoted yet, in_recovery: "$IN_RECOVERY
+    sleep 2
+  done
+
+else
+  echo "Replica restore mode"
+
+  while true; do
+    PAUSED=$(psql -U postgres -Atqc "SELECT pg_is_wal_replay_paused();")
+
+    if [[ "$PAUSED" == "t" ]]; then
+      echo "Reached recovery target and paused"
+      break
+    fi
+    echo "wal replay not paused yet, paused: "$PAUSED
+    sleep 2
+  done
+fi
+
+pg_ctl stop -D "$PGDATA" -m fast -w
 # Find and output all log files matching the pattern
 for log_file in "$LOG_DIR"/$LOG_FILE_PATTERN; do
     echo "---------------------------------------"
     echo "Outputting contents of: $log_file"
     cat "$log_file"
     echo "---------------------------------------"
-    if grep -rq "$PATTERN5" "$log_file"; then
-      IN_MIDDLE_OF_BB="true"
-    fi
 done
-
-if [[ "$IN_MIDDLE_OF_BB" != "false" ]];then
-  echo "PITR Restore timestamp might fall in between a base backup."
-  echo "Consider choosing a point that do not lies in between a base backup."
-  echo "Hints: decrease the PITR time or increase it in case you have another base backup taken after current PITR time"
-fi
-
-if [[ ! -e "$RECOVERY_FILE" && "$INSIDE" == "true" ]]; then
-    echo "database successfully recovered...."
-    pg_ctl stop -D "$PGDATA" -w >/dev/null 2>&1 || echo "Warning: PostgreSQL stop command failed but ignoring..."
-    exit 0
-else
-    exit 1
-fi

@@ -30,6 +30,7 @@
 
 export POSTGRES_INITDB_ARGS=${POSTGRES_INITDB_ARGS:-}
 # Create the transaction log directory before initdb is run
+ENABLE_CHECKSUM=${ENABLE_CHECKSUM:-false}
 
 if [[ "$MAJOR_PG_VERSION" == "9" ]]; then
     export POSTGRES_INITDB_XLOGDIR=${POSTGRES_INITDB_XLOGDIR:-}
@@ -47,6 +48,13 @@ else
 
         export POSTGRES_INITDB_ARGS="$POSTGRES_INITDB_ARGS --waldir $POSTGRES_INITDB_WALDIR"
     fi
+fi
+
+if [[ "$MAJOR_PG_VERSION" == "18" && "$ENABLE_CHECKSUM" != "true" ]];then
+    export POSTGRES_INITDB_ARGS="$POSTGRES_INITDB_ARGS --no-data-checksums"
+fi
+if [[ "$MAJOR_PG_VERSION" != "18" && "$ENABLE_CHECKSUM" == "true" ]];then
+    export POSTGRES_INITDB_ARGS="$POSTGRES_INITDB_ARGS --data-checksums"
 fi
 
 distro=$(grep '^ID' /etc/os-release)
