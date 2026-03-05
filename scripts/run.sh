@@ -24,7 +24,9 @@ rm -f "$PGDATA"/postmaster.pid
 echo "waiting for the role to be decided ..."
 while true; do
   # Robust /var/pv mount availability check before any destructive operation or basebackup
-
+    if [[ -e /var/pv/BOOTSTRAP_INITIALIZATION_STARTED ]]; then
+        rm /var/pv/BOOTSTRAP_INITIALIZATION_STARTED
+    fi
     if [[ -d $PGDATA ]];then
       DIR="$PGDATA"
       CURRENT_PERMS=$(stat -c "%a" "$DIR")
