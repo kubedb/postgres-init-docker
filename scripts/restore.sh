@@ -150,3 +150,7 @@ for log_file in "$LOG_DIR"/$LOG_FILE_PATTERN; do
     cat "$log_file"
     echo "---------------------------------------"
 done
+
+if [[ -f "$PGDATA/recovery.signal" ]]; then
+    rm "$PGDATA/recovery.signal"
+fi
