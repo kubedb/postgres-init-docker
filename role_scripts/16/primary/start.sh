@@ -113,7 +113,10 @@ if [[ -f "/var/pv/data/standby.signal" ]];then
 fi
 # alter postgres superuser
 "${psql[@]}" --username postgres <<-EOSQL
+    BEGIN;
+    SET LOCAL synchronous_commit TO OFF;
     $op USER "$POSTGRES_USER" WITH SUPERUSER PASSWORD '$POSTGRES_PASSWORD';
+    COMMIT;
 EOSQL
 echo
 
