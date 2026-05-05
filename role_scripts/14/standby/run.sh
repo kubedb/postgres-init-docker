@@ -94,11 +94,16 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     if [[ ! -e "/var/pv/IGNORE_FILESYSTEM_MOUNT_CHECK" ]]; then
       # Robust /var/pv mount availability check before any destructive operation or basebackup
       pv_df_output=$(df -hP 2>&1)
-      if echo "$pv_df_output" | grep -qi "Transport endpoint is not connected"; then
-          echo "ERROR: /var/pv mount not healthy (Transport endpoint is not connected). Aborting basebackup."
-          exit 1
-      fi
-      if ! echo "$pv_df_output" | awk '{print $NF}' | grep -qx "/var/pv"; then
+
+      pv_mounted=false
+      while IFS= read -r line; do
+        last_field=$(echo "$line" | awk '{print $NF}')
+        if [[ "$last_field" == "/var/pv" ]]; then
+          pv_mounted=true
+          break
+        fi
+      done <<< "$pv_df_output"
+      if [[ "$pv_mounted" != "true" ]]; then
           echo "ERROR: /var/pv is not mounted (not listed in df). Aborting basebackup."
           echo "$pv_df_output"
           exit 1
@@ -167,13 +172,14 @@ if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
     echo "synchronous_commit = remote_write" >>/tmp/postgresql.conf
 
-    # https://stackoverflow.com/a/44092231/244009
-    self_idx=$(echo $HOSTNAME | grep -Eo '[0-9]+$')
+# https://stackoverflow.com/a/44092231/244009
+    self_idx=${HOSTNAME##*[!0-9]}
     echo "$self_idx"
 
     shopt -s extglob
     sts_prefix=${HOSTNAME%%+([0-9])}
     names=""
+    # this needs to be changed for read replicas
     for ((i = 0; i < $REPLICAS; i++)); do
         if [[ $self_idx == $i ]]; then
             echo "skip $i"
@@ -181,7 +187,7 @@ if [[ "$STREAMING" == "synchronous" ]]; then
             names+="\"$sts_prefix$i\","
         fi
     done
-    names=$(echo "$names" | rev | cut -c2- | rev)
+    names=${names%,}
     echo "synchronous_standby_names = 'ANY 1 ("$names")'" >>/tmp/postgresql.conf
 fi
 

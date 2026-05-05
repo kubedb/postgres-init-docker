@@ -57,8 +57,18 @@ if [[ "$MAJOR_PG_VERSION" != "18" && "$ENABLE_CHECKSUM" == "true" ]];then
     export POSTGRES_INITDB_ARGS="$POSTGRES_INITDB_ARGS --data-checksums"
 fi
 
-distro=$(grep '^ID' /etc/os-release)
-distro=${distro#"ID="}
+if [[ -f /etc/os-release ]]; then
+    distro=""
+    while IFS='=' read -r key value; do
+        if [[ "$key" == "ID" ]]; then
+            distro=${value//\"/}
+            break
+        fi
+    done < /etc/os-release
+else
+    distro="unknown"
+fi
+
 if [[ "$distro" == "debian" ]]; then
     export LD_PRELOAD="$(find /usr/lib/ -name libnss_wrapper.so)"
     touch /tmp/tmp.nss_passwd /tmp/tmp.nss_grp

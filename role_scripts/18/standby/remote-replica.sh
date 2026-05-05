@@ -47,13 +47,16 @@ done
 
 if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     pv_df_output=$(df -hP 2>&1)
-    # Fail if kernel reports a broken FUSE mount anywhere
-    if echo "$pv_df_output" | grep -qi "Transport endpoint is not connected"; then
-        echo "ERROR: /var/pv mount not healthy (Transport endpoint is not connected)."
-        exit 1
-    fi
     # Ensure /var/pv is actually mounted (present in df output)
-    if ! echo "$pv_df_output" | awk '{print $NF}' | grep -qx "/var/pv"; then
+    pv_mounted=false
+    while IFS= read -r line; do
+      last_field=$(echo "$line" | awk '{print $NF}')
+      if [[ "$last_field" == "/var/pv" ]]; then
+        pv_mounted=true
+        break
+      fi
+    done <<< "$pv_df_output"
+    if [[ "$pv_mounted" != "true" ]]; then
         echo "ERROR: /var/pv is not mounted (not listed in df)."
         exit 1
     fi
