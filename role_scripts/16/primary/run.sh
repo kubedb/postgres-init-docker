@@ -26,11 +26,11 @@ export PGWAL="$PGDATA/pg_wal"
 export ARCHIVE=${ARCHIVE:-}
 if [ ! -e "$PGDATA/PG_VERSION" ]; then
     if [[ ! -e "/var/pv/IGNORE_FILESYSTEM_MOUNT_CHECK" ]]; then
-      pv_df_output=$(df -hP 2>&1)
+      pv_df_output=$(cat /proc/mounts)
       # Ensure /var/pv is actually mounted (present in df output)
       pv_mounted=false
       while IFS= read -r line; do
-        last_field=$(echo "$line" | awk '{print $NF}')
+        last_field=$(echo "$line" | awk '{print $2}')
         if [[ "$last_field" == "/var/pv" ]]; then
           pv_mounted=true
           break

@@ -46,20 +46,20 @@ while true; do
 done
 
 if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
-    pv_df_output=$(df -hP 2>&1)
-    # Ensure /var/pv is actually mounted (present in df output)
-    pv_mounted=false
-    while IFS= read -r line; do
-      last_field=$(echo "$line" | awk '{print $NF}')
-      if [[ "$last_field" == "/var/pv" ]]; then
-        pv_mounted=true
-        break
+      pv_df_output=$(cat /proc/mounts)
+      # Ensure /var/pv is actually mounted (present in df output)
+      pv_mounted=false
+      while IFS= read -r line; do
+        last_field=$(echo "$line" | awk '{print $2}')
+        if [[ "$last_field" == "/var/pv" ]]; then
+          pv_mounted=true
+          break
+        fi
+      done <<< "$pv_df_output"
+      if [[ "$pv_mounted" != "true" ]]; then
+          echo "ERROR: /var/pv is not mounted (not listed in df)."
+          exit 1
       fi
-    done <<< "$pv_df_output"
-    if [[ "$pv_mounted" != "true" ]]; then
-        echo "ERROR: /var/pv is not mounted (not listed in df)."
-        exit 1
-    fi
     # Ensure the mountpoint is accessible
     if ! ls /var/pv >/dev/null 2>&1; then
         echo "ERROR: /var/pv is not accessible."
