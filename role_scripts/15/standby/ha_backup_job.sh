@@ -104,7 +104,7 @@ if [[ "$STREAMING" == "synchronous" ]]; then
     echo "synchronous_commit = remote_write" >>/tmp/postgresql.conf
 
     # https://stackoverflow.com/a/44092231/244009
-    self_idx=$(echo $HOSTNAME | grep -Eo '[0-9]+$')
+    self_idx=${HOSTNAME##*[!0-9]}
     echo "$self_idx"
 
     shopt -s extglob
@@ -117,7 +117,7 @@ if [[ "$STREAMING" == "synchronous" ]]; then
             names+="\"$sts_prefix$i\","
         fi
     done
-    names=$(echo "$names" | rev | cut -c2- | rev)
+    names=${names%,}
     echo "synchronous_standby_names = 'ANY 1 ("$names")'" >>/tmp/postgresql.conf
 fi
 if [[ "${SSL:-0}" == "ON" ]]; then
