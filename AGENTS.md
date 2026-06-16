@@ -15,12 +15,51 @@ When `kubedb.dev/postgres` reconciles a `Postgres` CR it builds a PetSet via `pk
 | `postgres-init-container` | `GetInitContainers` | Always |
 | `pg-fsgroup-init` | `getEnforceFsGroupInitContainers` | Only when `db.Spec.EnforceFsGroup: true` |
 
-The `postgres-init-container` runs before the main `postgres` container starts. It:
-- Initialises PGDATA (`initdb.sh`) for a fresh pod
-- Copies run/role scripts to shared volumes (`kubedb.PostgresRunScriptsDir`, `kubedb.PostgresSharedScriptsDir`, `kubedb.PostgresRoleScriptsDir`)
-- Configures SSL when `SSL=ON`
-- Performs base-backup recovery for replica pods (`do_pg_basebackup.sh`, `recover_replica.sh`)
-- Sets up archiver restore entrypoints (`restore.sh`, `config_recovery.conf.sh`)
+The `postgres-init-container` runs before the main `postgres` container starts. Its entrypoint is `init_scripts/run.sh`, which:
+
+1. Clears `/run_scripts/` and copies `/tmp/scripts/*` → `/scripts/` (the shared scripts volume).
+2. Copies role-specific scripts based on mode:
+   - **Remote replica** (`REMOTE_REPLICA=true`): copies `role_scripts/$MAJOR_PG_VERSION/standby/*` → `/run_scripts/role/` directly.
+   - **Standalone** (`STANDALONE=true`, i.e. single replica): copies `role_scripts/$MAJOR_PG_VERSION/primary/*` → `/run_scripts/role/` directly.
+   - **HA cluster** (replicas > 1, coordinator present): copies the full `role_scripts/$MAJOR_PG_VERSION/` tree (both `primary/` and `standby/` subdirs) → `/role_scripts/`. The **pg-coordinator** then decides the role at runtime and calls `AddRoleBasedScripts()` to copy the correct subset to `/run_scripts/role/`.
+3. For PG version ≤ 11 keeps `config_recovery.conf.sh` and `do_pg_recovery_cleanup.sh`; removes them for PG ≥ 12.
+4. Copies TLS certs to `/tls/` and applies `chmod 0600` when `SSL=ON` or `SOURCE_SSL=ON`.
+
+### Role scripts layout
+
+```
+role_scripts/
+  <major_version>/       # e.g. 16/
+    primary/
+      run.sh             # starts postgres as primary
+      start.sh           # pg_ctl start wrapper
+      db.sh              # post-start DB setup
+      postgresql.conf    # primary-specific GUCs
+    standby/
+      run.sh             # starts postgres in standby/recovery mode
+      warm_standby.sh    # streaming replication setup
+      remote-replica.sh  # remote replica variant
+      postgresql.conf    # standby-specific GUCs
+```
+
+The presence of `/run_scripts/role/run.sh` is the signal to the main `postgres` container that a role has been assigned and the server should start. Absence means it waits.
+
+### Script handoff between init container and coordinator
+
+```
+init container (run.sh)
+  └─ HA mode: copies role_scripts/<ver>/{primary,standby}/ → /role_scripts/
+        │
+        ▼
+pg-coordinator (AddRoleBasedScripts)          ← called on every Raft role change
+  └─ copies /role_scripts/<raftRole>/* → /run_scripts/role/
+        │
+        ▼
+postgres container
+  └─ exec /run_scripts/role/run.sh           ← starts as primary or standby
+```
+
+`RemoveRoleBasedScripts()` clears `/run_scripts/` before a role transition so the postgres process stops cleanly.
 
 The `pg-fsgroup-init` container (same image, different command) runs `chmod 0777 /var/pv` to fix volume fsGroup ownership for restrictive pod security contexts.
 
