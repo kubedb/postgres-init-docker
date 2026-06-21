@@ -42,7 +42,7 @@ echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
 
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
-    echo "synchronous_commit = remote_write" >>/tmp/postgresql.conf
+    echo "synchronous_commit = ${SYNC_COMMIT_LEVEL:-remote_write}" >>/tmp/postgresql.conf
 
     # https://stackoverflow.com/a/44092231/244009
     self_idx=${HOSTNAME##*[!0-9]}
@@ -59,7 +59,7 @@ if [[ "$STREAMING" == "synchronous" ]]; then
         fi
     done
     names=${names%,}
-    echo "synchronous_standby_names = 'ANY 1 ("$names")'" >>/tmp/postgresql.conf
+    echo "synchronous_standby_names = '${SYNC_REPLICATION_MODE:-ANY} ${NUM_SYNC_REPLICAS:-1} ("$names")'" >>/tmp/postgresql.conf
 fi
 
 if [[ "${SSL:-0}" == "ON" ]]; then
