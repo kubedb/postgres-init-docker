@@ -11,8 +11,9 @@ export remote_replica=${REMOTE_REPLICA:-false}
 export source_ssl=${SOURCE_SSL:-false}
 
 if [[ $remote_replica == "true" ]]; then
-    mkdir -p /run_scripts/role
+    mkdir -p /run_scripts/role /role_scripts/standby
     cp -r /tmp/role_scripts/$MAJOR_PG_VERSION/standby/* /run_scripts/role/
+    cp -r /tmp/role_scripts/$MAJOR_PG_VERSION/standby/* /role_scripts/standby/
 elif [[ $STANDALONE == "true" ]]; then
     mkdir -p /run_scripts/role
     cp -r /tmp/role_scripts/$MAJOR_PG_VERSION/primary/* /run_scripts/role/
