@@ -261,7 +261,9 @@ if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
     echo "synchronous_commit = ${SYNC_COMMIT_LEVEL:-remote_write}" >>/tmp/postgresql.conf
 
-    if [[ -n "${SYNC_STANDBY_NAMES:-}" ]]; then
+    if [[ "${SYNC_USE_WILDCARD:-false}" == "true" ]]; then
+        names="*"
+    elif [[ -n "${SYNC_STANDBY_NAMES:-}" ]]; then
         names=""
         IFS=',' read -ra _standby_list <<< "$SYNC_STANDBY_NAMES"
         for _name in "${_standby_list[@]}"; do
