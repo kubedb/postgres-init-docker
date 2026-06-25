@@ -105,8 +105,12 @@ psql=(psql -v ON_ERROR_STOP=1)
 if [[ -f "/var/pv/data/standby.signal" ]]; then
     echo "standby.signal present -> promoting to fork a new timeline before writes"
     pg_ctl -D "$PGDATA" promote || true
+    # Wait until recovery has ended using pg_controldata (no DB connection / role dependency, so a
+    # missing or renamed superuser role can never stall this loop). State goes from
+    # "in archive recovery" to "in production" once promotion completes.
     for _ in $(seq 1 120); do
-        if [[ "$("${psql[@]}" --username postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null)" == "f" ]]; then
+        state=$(pg_controldata "$PGDATA" 2>/dev/null | grep "Database cluster state" | sed 's/.*:[[:space:]]*//')
+        if [[ "$state" == "in production" ]]; then
             echo "promotion complete; node is now primary on a new timeline"
             break
         fi
