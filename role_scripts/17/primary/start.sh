@@ -95,6 +95,29 @@ export POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
 
 psql=(psql -v ON_ERROR_STOP=1)
 
+# If standby.signal is present, postgres started in recovery above (this node was a standby being
+# promoted). Promote it NOW to fork a NEW timeline BEFORE any write below. This is essential for the
+# remote-replica -> standalone-HA transition: without promoting from recovery the node comes up on
+# the SAME timeline as its former source cluster, which on failback forces a full pg_basebackup
+# instead of pg_rewind. Promotion ends recovery, increments the timeline, and removes standby.signal.
+# A normal primary start (no standby.signal) skips this block, so fresh bootstrap and the live-standby
+# fast-failover path (which promotes via the coordinator, not start.sh) are unaffected.
+if [[ -f "/var/pv/data/standby.signal" ]]; then
+    echo "standby.signal present -> promoting to fork a new timeline before writes"
+    pg_ctl -D "$PGDATA" promote || true
+    # Wait until recovery has ended using pg_controldata (no DB connection / role dependency, so a
+    # missing or renamed superuser role can never stall this loop). State goes from
+    # "in archive recovery" to "in production" once promotion completes.
+    for _ in $(seq 1 120); do
+        state=$(pg_controldata "$PGDATA" 2>/dev/null | grep "Database cluster state" | sed 's/.*:[[:space:]]*//')
+        if [[ "$state" == "in production" ]]; then
+            echo "promotion complete; node is now primary on a new timeline"
+            break
+        fi
+        sleep 1
+    done
+fi
+
 # create database with specified name
 if [ "$POSTGRES_DB" != "postgres" ]; then
     "${psql[@]}" --username postgres <<-EOSQL
