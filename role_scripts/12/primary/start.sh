@@ -149,9 +149,15 @@ SQL
             ;;
     esac
 
-    # Set the per-database principal key.
-    psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
-        "SELECT pg_tde_set_key_using_global_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" || true
+    # Set the per-database principal key with the setter that matches the
+    # provider scope: file providers are database-scoped, vault/kmip are global.
+    if [[ "${TDE_PROVIDER_KIND:-}" == "file" ]]; then
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_set_key_using_database_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" || true
+    else
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_set_key_using_global_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" || true
+    fi
 
     # If WAL encryption is requested, set the server key too (global only).
     if [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]]; then
