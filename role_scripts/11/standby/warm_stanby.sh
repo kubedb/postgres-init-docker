@@ -35,7 +35,16 @@ echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 
 echo "hot_standby = off" >>/tmp/postgresql.conf
-echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
+PRELOAD="pg_stat_statements"
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    PRELOAD="${TDE_EXTENSION:-pg_tde},${PRELOAD}"
+fi
+echo "shared_preload_libraries = '${PRELOAD}'" >>/tmp/postgresql.conf
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]] && echo "pg_tde.wal_encrypt = on" >>/tmp/postgresql.conf
+    [[ "${TDE_ENFORCE:-false}" == "true" ]] && echo "pg_tde.enforce_encryption = on" >>/tmp/postgresql.conf
+    echo "pg_tde.cipher = '${TDE_CIPHER:-aes_128}'" >>/tmp/postgresql.conf
+fi
 
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication

@@ -84,6 +84,18 @@ fi
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 echo "logging_collector = on" >>/tmp/postgresql.conf
+# pg_tde must be preloaded during recovery/restore or an encrypted
+# cluster corrupts. Compose the list with pg_tde first when enabled.
+PRELOAD="pg_stat_statements"
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    PRELOAD="${TDE_EXTENSION:-pg_tde},${PRELOAD}"
+fi
+echo "shared_preload_libraries = '${PRELOAD}'" >>/tmp/postgresql.conf
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]] && echo "pg_tde.wal_encrypt = on" >>/tmp/postgresql.conf
+    [[ "${TDE_ENFORCE:-false}" == "true" ]] && echo "pg_tde.enforce_encryption = on" >>/tmp/postgresql.conf
+    echo "pg_tde.cipher = '${TDE_CIPHER:-aes_128}'" >>/tmp/postgresql.conf
+fi
 cat /run_scripts/role/postgresql.conf >>/tmp/postgresql.conf
 mv /tmp/postgresql.conf "$PGDATA/postgresql.conf"
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
@@ -111,7 +123,6 @@ until pg_isready -U postgres; do
     done
   fi
 done
-
 
 if [[ "$HOST" =~ -0$ ]]; then
   echo "Primary restore mode"

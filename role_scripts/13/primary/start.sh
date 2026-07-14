@@ -42,7 +42,11 @@ else
     echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 fi
 
-echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
+PRELOAD="pg_stat_statements"
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    PRELOAD="${TDE_EXTENSION:-pg_tde},${PRELOAD}"
+fi
+echo "shared_preload_libraries = '${PRELOAD}'" >>/tmp/postgresql.conf
 
 if [[ "${SSL:-0}" == "ON" ]]; then
     echo "ssl =on" >>/tmp/postgresql.conf
@@ -137,6 +141,45 @@ echo
 
 psql+=(--username "$POSTGRES_USER" --dbname "$POSTGRES_DB")
 echo
+
+# pg_tde principal-key bootstrap. Runs once on first initialization, after the
+# database and superuser exist and before any encrypted table or the
+# default_table_access_method flip can be used. Idempotent on retries.
+if [[ "${TDE_ENABLED:-false}" == "true" && "${BOOTSTRAP}" == "true" ]]; then
+    # Enable the extension in the default databases. template1 makes it the
+    # default for future databases.
+    for TDE_DB in template1 "$POSTGRES_DB"; do
+        psql -U postgres -d "$TDE_DB" -v ON_ERROR_STOP=1 <<SQL
+CREATE EXTENSION IF NOT EXISTS ${TDE_EXTENSION:-pg_tde};
+SQL
+    done
+
+    # Register the key provider (global preferred; file is standalone only).
+    case "${TDE_PROVIDER_KIND:-}" in
+        vault)
+            psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                "SELECT pg_tde_add_global_key_provider_vault_v2('${TDE_PROVIDER_NAME}','${TDE_VAULT_ADDR}','${TDE_VAULT_MOUNT}','${TDE_VAULT_TOKEN_PATH}','${TDE_VAULT_CA_PATH}');" || true
+            ;;
+        kmip)
+            psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                "SELECT pg_tde_add_global_key_provider_kmip('${TDE_PROVIDER_NAME}','${TDE_KMIP_ADDR}',${TDE_KMIP_PORT},'${TDE_KMIP_CLIENT_CERT_PATH}','${TDE_KMIP_CLIENT_KEY_PATH}','${TDE_KMIP_CA_PATH}');" || true
+            ;;
+        file)
+            psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                "SELECT pg_tde_add_database_key_provider_file('${TDE_PROVIDER_NAME}','${TDE_FILE_PATH}');" || true
+            ;;
+    esac
+
+    # Set the per-database principal key.
+    psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        "SELECT pg_tde_set_key_using_global_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" || true
+
+    # If WAL encryption is requested, set the server key too (global only).
+    if [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]]; then
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_set_server_key_using_global_key_provider('${TDE_KEY_NAME}-wal','${TDE_PROVIDER_NAME}');" || true
+    fi
+fi
 
 if [[ "$BOOTSTRAP" == "true" ]];then
   # initialize database
@@ -264,6 +307,14 @@ fi
 mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 
 touch /tmp/postgresql.conf
+# pg_tde runtime GUCs. Authored in the post-bootstrap rewrite, after the
+# extension and principal key exist, so default_table_access_method is safe.
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]] && echo "pg_tde.wal_encrypt = on" >>/tmp/postgresql.conf
+    [[ "${TDE_ENFORCE:-false}" == "true" ]] && echo "pg_tde.enforce_encryption = on" >>/tmp/postgresql.conf
+    [[ "${TDE_DEFAULT_AM:-false}" == "true" ]] && echo "default_table_access_method = tde_heap" >>/tmp/postgresql.conf
+    echo "pg_tde.cipher = '${TDE_CIPHER:-aes_128}'" >>/tmp/postgresql.conf
+fi
 if [ "$STANDBY" == "hot" ]; then
     echo "hot_standby = on" >>/tmp/postgresql.conf
 else
