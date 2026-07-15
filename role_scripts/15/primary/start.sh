@@ -153,6 +153,10 @@ echo
 # database and superuser exist and before any encrypted table or the
 # default_table_access_method flip can be used. Idempotent on retries.
 if [[ "${TDE_ENABLED:-false}" == "true" && "${BOOTSTRAP}" == "true" ]]; then
+    # Run every pg_tde key operation in this block at the configured cipher. The
+    # post-bootstrap config that carries pg_tde.cipher is not loaded yet, so without
+    # this the principal key would be created (and validated) at the wrong length.
+    export PGOPTIONS="-c pg_tde.cipher=${TDE_CIPHER:-aes_128}"
     # Enable the extension in the default databases. template1 makes it the
     # default for future databases.
     for TDE_DB in template1 "$POSTGRES_DB"; do
@@ -183,14 +187,14 @@ SQL
     # Key setup is strict: a failure fails the bootstrap loudly rather than booting
     # with no principal key, which would silently break encrypted-table creation.
     if [[ "${TDE_PROVIDER_KIND:-}" == "file" ]]; then
-        PGOPTIONS="-c pg_tde.cipher=${TDE_CIPHER:-aes_128}" psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_create_key_using_database_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
             || echo "pg_tde: create principal key returned non-zero (may already exist), continuing to set"
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_set_key_using_database_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
             || { echo "pg_tde FATAL: failed to set database principal key '${TDE_KEY_NAME}'"; exit 1; }
     else
-        PGOPTIONS="-c pg_tde.cipher=${TDE_CIPHER:-aes_128}" psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_create_key_using_global_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
             || echo "pg_tde: create principal key returned non-zero (may already exist), continuing to set"
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
@@ -200,7 +204,7 @@ SQL
 
     # If WAL encryption is requested, create + set the server (WAL) key too (global only).
     if [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]]; then
-        PGOPTIONS="-c pg_tde.cipher=${TDE_CIPHER:-aes_128}" psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_create_key_using_global_key_provider('${TDE_KEY_NAME}-wal','${TDE_PROVIDER_NAME}');" \
             || echo "pg_tde: create WAL server key returned non-zero (may already exist), continuing to set"
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
@@ -208,6 +212,8 @@ SQL
             || { echo "pg_tde FATAL: failed to set WAL server key '${TDE_KEY_NAME}-wal'"; exit 1; }
     fi
 fi
+
+unset PGOPTIONS
 
 if [[ "$BOOTSTRAP" == "true" ]];then
   # initialize database
