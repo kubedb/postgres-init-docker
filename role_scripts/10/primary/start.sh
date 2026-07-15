@@ -100,6 +100,18 @@ if [[ "${TDE_ENABLED:-false}" == "true" && "${BOOTSTRAP}" == "true" ]]; then
     # post-bootstrap config that carries pg_tde.cipher is not loaded yet, so without
     # this the principal key would be created (and validated) at the wrong length.
     export PGOPTIONS="-c pg_tde.cipher=${TDE_CIPHER:-aes_128}"
+    # tde_bootstrap_fatal aborts a failed first-time TDE bootstrap loudly. This runs
+    # only during initial initialization (BOOTSTRAP=true), so there is no user data
+    # yet; wipe the half-initialized data dir and exit non-zero. That forces a full
+    # re-bootstrap on the next start instead of falling through to a keyless boot
+    # (which would silently disable encryption). The pod crash-loops visibly until
+    # the key provider is reachable.
+    tde_bootstrap_fatal() {
+        echo "pg_tde FATAL: $1"
+        pg_ctl -D "$PGDATA" -m immediate -w stop || true
+        rm -rf "${PGDATA:?}"/* || true
+        exit 1
+    }
     # Enable the extension in the default databases. template1 makes it the
     # default for future databases.
     for TDE_DB in template1 "$POSTGRES_DB"; do
@@ -135,14 +147,14 @@ SQL
             || echo "pg_tde: create principal key returned non-zero (may already exist), continuing to set"
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_set_key_using_database_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
-            || { echo "pg_tde FATAL: failed to set database principal key '${TDE_KEY_NAME}'"; exit 1; }
+            || tde_bootstrap_fatal "failed to set database principal key '${TDE_KEY_NAME}'"
     else
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_create_key_using_global_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
             || echo "pg_tde: create principal key returned non-zero (may already exist), continuing to set"
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_set_key_using_global_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
-            || { echo "pg_tde FATAL: failed to set global principal key '${TDE_KEY_NAME}'"; exit 1; }
+            || tde_bootstrap_fatal "failed to set global principal key '${TDE_KEY_NAME}'"
     fi
 
     # If WAL encryption is requested, create + set the server (WAL) key too (global only).
@@ -152,7 +164,7 @@ SQL
             || echo "pg_tde: create WAL server key returned non-zero (may already exist), continuing to set"
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_set_server_key_using_global_key_provider('${TDE_KEY_NAME}-wal','${TDE_PROVIDER_NAME}');" \
-            || { echo "pg_tde FATAL: failed to set WAL server key '${TDE_KEY_NAME}-wal'"; exit 1; }
+            || tde_bootstrap_fatal "failed to set WAL server key '${TDE_KEY_NAME}-wal'"
     fi
 fi
 
