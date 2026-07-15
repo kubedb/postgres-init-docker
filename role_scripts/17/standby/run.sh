@@ -169,6 +169,7 @@ echo "shared_preload_libraries = '${PRELOAD}'" >>/tmp/postgresql.conf
 if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
     [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]] && echo "pg_tde.wal_encrypt = on" >>/tmp/postgresql.conf
     [[ "${TDE_ENFORCE:-false}" == "true" ]] && echo "pg_tde.enforce_encryption = on" >>/tmp/postgresql.conf
+    [[ "${TDE_DEFAULT_AM:-false}" == "true" ]] && echo "default_table_access_method = tde_heap" >>/tmp/postgresql.conf
     echo "pg_tde.cipher = '${TDE_CIPHER:-aes_128}'" >>/tmp/postgresql.conf
 fi
 

@@ -210,6 +210,13 @@ SQL
             || tde_bootstrap_fatal "failed to set global principal key '${TDE_KEY_NAME}'"
     fi
 
+    # WAL encryption is global-only: the file keyring is a database-scoped
+    # provider and cannot back a server key. The operator webhook already rejects
+    # this combination, so this is a fail-closed backstop with a clear message
+    # (instead of a swallowed error that crash-loops on the misleading set-key fatal).
+    if [[ "${TDE_ENCRYPT_WAL:-false}" == "true" && "${TDE_PROVIDER_KIND:-}" == "file" ]]; then
+        tde_bootstrap_fatal "WAL encryption requires a global (vault or kmip) key provider; the file keyring cannot back WAL encryption"
+    fi
     # If WAL encryption is requested, create + set the server (WAL) key too (global only).
     if [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]]; then
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
