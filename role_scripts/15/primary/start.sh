@@ -183,14 +183,14 @@ SQL
     # Key setup is strict: a failure fails the bootstrap loudly rather than booting
     # with no principal key, which would silently break encrypted-table creation.
     if [[ "${TDE_PROVIDER_KIND:-}" == "file" ]]; then
-        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        PGOPTIONS="-c pg_tde.cipher=${TDE_CIPHER:-aes_128}" psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_create_key_using_database_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
             || echo "pg_tde: create principal key returned non-zero (may already exist), continuing to set"
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_set_key_using_database_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
             || { echo "pg_tde FATAL: failed to set database principal key '${TDE_KEY_NAME}'"; exit 1; }
     else
-        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        PGOPTIONS="-c pg_tde.cipher=${TDE_CIPHER:-aes_128}" psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_create_key_using_global_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
             || echo "pg_tde: create principal key returned non-zero (may already exist), continuing to set"
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
@@ -200,7 +200,7 @@ SQL
 
     # If WAL encryption is requested, create + set the server (WAL) key too (global only).
     if [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]]; then
-        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+        PGOPTIONS="-c pg_tde.cipher=${TDE_CIPHER:-aes_128}" psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_create_key_using_global_key_provider('${TDE_KEY_NAME}-wal','${TDE_PROVIDER_NAME}');" \
             || echo "pg_tde: create WAL server key returned non-zero (may already exist), continuing to set"
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
