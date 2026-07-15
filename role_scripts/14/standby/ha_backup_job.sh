@@ -61,6 +61,7 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     chmod 0700 "$PGDATA"
     BASEBACKUP=pg_basebackup
     [[ "${TDE_ENABLED:-false}" == "true" ]] && BASEBACKUP=pg_tde_basebackup
+    echo "pg_tde: seeding standby with '$BASEBACKUP' (TDE_ENABLED=${TDE_ENABLED:-false})"
     if [[ "${SSL:-0}" == "ON" ]]; then
         "$BASEBACKUP" -X fetch --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
     else
