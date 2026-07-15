@@ -183,8 +183,18 @@ SQL
     # Register the key provider (global preferred; file is standalone only).
     case "${TDE_PROVIDER_KIND:-}" in
         vault)
-            psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
-                "SELECT pg_tde_add_global_key_provider_vault_v2('${TDE_PROVIDER_NAME}','${TDE_VAULT_ADDR}','${TDE_VAULT_MOUNT}','${TDE_VAULT_TOKEN_PATH}','${TDE_VAULT_CA_PATH}');" || true
+            # pg_tde_add_global_key_provider_vault_v2 has a 5-arg form and a 6-arg
+            # form that also takes a Vault Enterprise namespace. Pass the namespace
+            # (spec.tde.keyProvider.vault.namespace -> TDE_VAULT_NAMESPACE) only when
+            # it is set, so the common namespace-less case keeps the 5-arg form; the
+            # namespace was otherwise accepted in the CRD but silently dropped here.
+            if [[ -n "${TDE_VAULT_NAMESPACE:-}" ]]; then
+                psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                    "SELECT pg_tde_add_global_key_provider_vault_v2('${TDE_PROVIDER_NAME}','${TDE_VAULT_ADDR}','${TDE_VAULT_MOUNT}','${TDE_VAULT_TOKEN_PATH}','${TDE_VAULT_CA_PATH}','${TDE_VAULT_NAMESPACE}');" || true
+            else
+                psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                    "SELECT pg_tde_add_global_key_provider_vault_v2('${TDE_PROVIDER_NAME}','${TDE_VAULT_ADDR}','${TDE_VAULT_MOUNT}','${TDE_VAULT_TOKEN_PATH}','${TDE_VAULT_CA_PATH}');" || true
+            fi
             ;;
         kmip)
             psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
