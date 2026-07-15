@@ -215,6 +215,22 @@ SQL
         psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
             "SELECT pg_tde_set_key_using_global_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
             || tde_bootstrap_fatal "failed to set global principal key '${TDE_KEY_NAME}'"
+
+        # Set a server-wide DEFAULT principal key so databases created later inherit
+        # encryption. pg_tde stores the principal key per database OID and CREATE
+        # DATABASE does NOT copy it (a key set in template1 is not carried to its
+        # clones), so without a server default the first encrypted CREATE TABLE in a
+        # newly created database fails "principal key not configured" under a
+        # cluster-wide default_table_access_method = tde_heap. The default key is a
+        # global-provider feature; the file keyring (standalone, database-scoped) has
+        # no server default, so this applies to the vault/kmip providers only. Create
+        # precedes set, and the set is strict like the principal-key set above.
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_create_key_using_global_key_provider('${TDE_KEY_NAME}-default','${TDE_PROVIDER_NAME}');" \
+            || echo "pg_tde: create default key returned non-zero (may already exist), continuing to set"
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_set_default_key_using_global_key_provider('${TDE_KEY_NAME}-default','${TDE_PROVIDER_NAME}');" \
+            || tde_bootstrap_fatal "failed to set default principal key '${TDE_KEY_NAME}-default'"
     fi
 
     # WAL encryption is global-only: the file keyring is a database-scoped
