@@ -128,10 +128,15 @@ fi
 # ****************** Recovery config **************************
 echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
 # primary_conninfo is used for streaming replication
+CONNINFO_DBNAME=""
+if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
+    CONNINFO_DBNAME=" dbname=postgres"
+fi
+
 if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key'" >>/tmp/postgresql.conf
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key$CONNINFO_DBNAME'" >>/tmp/postgresql.conf
 else
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD'" >>/tmp/postgresql.conf
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD$CONNINFO_DBNAME'" >>/tmp/postgresql.conf
 fi
 
 cat /run_scripts/role/postgresql.conf >>/tmp/postgresql.conf
