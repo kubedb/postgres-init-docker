@@ -37,7 +37,11 @@ echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 
-echo "hot_standby = off" >>/tmp/postgresql.conf
+if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
+    echo "hot_standby = on" >>/tmp/postgresql.conf
+else
+    echo "hot_standby = off" >>/tmp/postgresql.conf
+fi
 
 echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
 
