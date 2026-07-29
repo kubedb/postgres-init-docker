@@ -42,7 +42,11 @@ else
     echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 fi
 
-echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
+PRELOAD="pg_stat_statements"
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    PRELOAD="${TDE_EXTENSION:-pg_tde},${PRELOAD}"
+fi
+echo "shared_preload_libraries = '${PRELOAD}'" >>/tmp/postgresql.conf
 
 if [[ "${SSL:-0}" == "ON" ]]; then
     echo "ssl =on" >>/tmp/postgresql.conf
@@ -116,6 +120,122 @@ echo
 
 psql+=(--username "$POSTGRES_USER" --dbname "$POSTGRES_DB")
 echo
+
+# pg_tde principal-key bootstrap. Runs once on first initialization, after the
+# database and superuser exist and before any encrypted table or the
+# default_table_access_method flip can be used. Idempotent on retries.
+if [[ "${TDE_ENABLED:-false}" == "true" && "${BOOTSTRAP}" == "true" ]]; then
+    # Run every pg_tde key operation in this block at the configured cipher. The
+    # post-bootstrap config that carries pg_tde.cipher is not loaded yet, so without
+    # this the principal key would be created (and validated) at the wrong length.
+    export PGOPTIONS="-c pg_tde.cipher=${TDE_CIPHER:-aes_128}"
+    # tde_bootstrap_fatal aborts a failed first-time TDE bootstrap loudly. This runs
+    # only during initial initialization (BOOTSTRAP=true), so there is no user data
+    # yet; wipe the half-initialized data dir and exit non-zero. That forces a full
+    # re-bootstrap on the next start instead of falling through to a keyless boot
+    # (which would silently disable encryption). The pod crash-loops visibly until
+    # the key provider is reachable.
+    tde_bootstrap_fatal() {
+        echo "pg_tde FATAL: $1"
+        pg_ctl -D "$PGDATA" -m immediate -w stop || true
+        rm -rf "${PGDATA:?}"/* || true
+        exit 1
+    }
+    # Enable the extension in the default databases. template1 makes it the
+    # default for future databases.
+    for TDE_DB in template1 "$POSTGRES_DB"; do
+        psql -U postgres -d "$TDE_DB" -v ON_ERROR_STOP=1 <<SQL
+CREATE EXTENSION IF NOT EXISTS ${TDE_EXTENSION:-pg_tde};
+SQL
+    done
+
+    # Register the key provider (global preferred; file is standalone only).
+    case "${TDE_PROVIDER_KIND:-}" in
+        vault)
+            # pg_tde_add_global_key_provider_vault_v2 has a 5-arg form and a 6-arg
+            # form that also takes a Vault Enterprise namespace. Pass the namespace
+            # (spec.tde.keyProvider.vault.namespace -> TDE_VAULT_NAMESPACE) only when
+            # it is set, so the common namespace-less case keeps the 5-arg form; the
+            # namespace was otherwise accepted in the CRD but silently dropped here.
+            if [[ -n "${TDE_VAULT_NAMESPACE:-}" ]]; then
+                psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                    "SELECT pg_tde_add_global_key_provider_vault_v2('${TDE_PROVIDER_NAME}','${TDE_VAULT_ADDR}','${TDE_VAULT_MOUNT}','${TDE_VAULT_TOKEN_PATH}','${TDE_VAULT_CA_PATH}','${TDE_VAULT_NAMESPACE}');" || true
+            else
+                psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                    "SELECT pg_tde_add_global_key_provider_vault_v2('${TDE_PROVIDER_NAME}','${TDE_VAULT_ADDR}','${TDE_VAULT_MOUNT}','${TDE_VAULT_TOKEN_PATH}','${TDE_VAULT_CA_PATH}');" || true
+            fi
+            ;;
+        kmip)
+            psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                "SELECT pg_tde_add_global_key_provider_kmip('${TDE_PROVIDER_NAME}','${TDE_KMIP_ADDR}',${TDE_KMIP_PORT},'${TDE_KMIP_CLIENT_CERT_PATH}','${TDE_KMIP_CLIENT_KEY_PATH}','${TDE_KMIP_CA_PATH}');" || true
+            ;;
+        file)
+            psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                "SELECT pg_tde_add_database_key_provider_file('${TDE_PROVIDER_NAME}','${TDE_FILE_PATH}');" || true
+            ;;
+    esac
+
+    # Create then set the per-database principal key. pg_tde requires the key to
+    # exist before it can be set as principal, so create precedes set. The setter
+    # matches the provider scope (file is database-scoped, vault/kmip are global).
+    # Key setup is strict: a failure fails the bootstrap loudly rather than booting
+    # with no principal key, which would silently break encrypted-table creation.
+    if [[ "${TDE_PROVIDER_KIND:-}" == "file" ]]; then
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_create_key_using_database_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
+            || echo "pg_tde: create principal key returned non-zero (may already exist), continuing to set"
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_set_key_using_database_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
+            || tde_bootstrap_fatal "failed to set database principal key '${TDE_KEY_NAME}'"
+    else
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_create_key_using_global_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
+            || echo "pg_tde: create principal key returned non-zero (may already exist), continuing to set"
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_set_key_using_global_key_provider('${TDE_KEY_NAME}','${TDE_PROVIDER_NAME}');" \
+            || tde_bootstrap_fatal "failed to set global principal key '${TDE_KEY_NAME}'"
+
+        # Set a server-wide DEFAULT principal key so databases created later inherit
+        # encryption. pg_tde stores the principal key per database OID and CREATE
+        # DATABASE does NOT copy it (a key set in template1 is not carried to its
+        # clones), so without a server default the first encrypted CREATE TABLE in a
+        # newly created database fails "principal key not configured". This only
+        # matters when new tables are encrypted by default or enforced cluster-wide,
+        # so gate it on TDE_DEFAULT_AM/TDE_ENFORCE (mirroring how the WAL block below
+        # gates on TDE_ENCRYPT_WAL): a plain opt-in-per-table cluster does not need a
+        # server default and should not take the strict-set crash-loop risk for it.
+        # The default key is a global-provider feature; the file keyring (standalone,
+        # database-scoped) has no server default, so this applies to vault/kmip only.
+        # Create precedes set, and the set is strict like the principal-key set above.
+        if [[ "${TDE_DEFAULT_AM:-false}" == "true" || "${TDE_ENFORCE:-false}" == "true" ]]; then
+            psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                "SELECT pg_tde_create_key_using_global_key_provider('${TDE_KEY_NAME}-default','${TDE_PROVIDER_NAME}');" \
+                || echo "pg_tde: create default key returned non-zero (may already exist), continuing to set"
+            psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+                "SELECT pg_tde_set_default_key_using_global_key_provider('${TDE_KEY_NAME}-default','${TDE_PROVIDER_NAME}');" \
+                || tde_bootstrap_fatal "failed to set default principal key '${TDE_KEY_NAME}-default'"
+        fi
+    fi
+
+    # WAL encryption is global-only: the file keyring is a database-scoped
+    # provider and cannot back a server key. The operator webhook already rejects
+    # this combination, so this is a fail-closed backstop with a clear message
+    # (instead of a swallowed error that crash-loops on the misleading set-key fatal).
+    if [[ "${TDE_ENCRYPT_WAL:-false}" == "true" && "${TDE_PROVIDER_KIND:-}" == "file" ]]; then
+        tde_bootstrap_fatal "WAL encryption requires a global (vault or kmip) key provider; the file keyring cannot back WAL encryption"
+    fi
+    # If WAL encryption is requested, create + set the server (WAL) key too (global only).
+    if [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]]; then
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_create_key_using_global_key_provider('${TDE_KEY_NAME}-wal','${TDE_PROVIDER_NAME}');" \
+            || echo "pg_tde: create WAL server key returned non-zero (may already exist), continuing to set"
+        psql -U postgres -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c \
+            "SELECT pg_tde_set_server_key_using_global_key_provider('${TDE_KEY_NAME}-wal','${TDE_PROVIDER_NAME}');" \
+            || tde_bootstrap_fatal "failed to set WAL server key '${TDE_KEY_NAME}-wal'"
+    fi
+fi
+
+unset PGOPTIONS
 
 if [[ "$BOOTSTRAP" == "true" ]];then
   # initialize database
@@ -233,6 +353,14 @@ fi
 mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 
 touch /tmp/postgresql.conf
+# pg_tde runtime GUCs. Authored in the post-bootstrap rewrite, after the
+# extension and principal key exist, so default_table_access_method is safe.
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]] && echo "pg_tde.wal_encrypt = on" >>/tmp/postgresql.conf
+    [[ "${TDE_ENFORCE:-false}" == "true" ]] && echo "pg_tde.enforce_encryption = on" >>/tmp/postgresql.conf
+    [[ "${TDE_DEFAULT_AM:-false}" == "true" ]] && echo "default_table_access_method = tde_heap" >>/tmp/postgresql.conf
+    echo "pg_tde.cipher = '${TDE_CIPHER:-aes_128}'" >>/tmp/postgresql.conf
+fi
 if [ "$STANDBY" == "hot" ]; then
     echo "hot_standby = on" >>/tmp/postgresql.conf
 else

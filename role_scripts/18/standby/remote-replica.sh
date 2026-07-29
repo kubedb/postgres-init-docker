@@ -69,10 +69,13 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     mkdir -p "$PGDATA"
     rm -rf "$PGDATA"/*
     chmod 0700 "$PGDATA"
+    BASEBACKUP=pg_basebackup
+    [[ "${TDE_ENABLED:-false}" == "true" ]] && BASEBACKUP=pg_tde_basebackup
+    echo "pg_tde: seeding standby with '$BASEBACKUP' (TDE_ENABLED=${TDE_ENABLED:-false})"
     if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        pg_basebackup -X fetch --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key"
+        "$BASEBACKUP" -X fetch --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key"
     else
-        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST"
+        "$BASEBACKUP" -X fetch --no-password --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST"
     fi
 fi
 
@@ -99,7 +102,17 @@ echo "wal_log_hints = on" >>/tmp/postgresql.conf
 echo "archive_mode = always" >>/tmp/postgresql.conf
 echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 
-echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
+PRELOAD="pg_stat_statements"
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    PRELOAD="${TDE_EXTENSION:-pg_tde},${PRELOAD}"
+fi
+echo "shared_preload_libraries = '${PRELOAD}'" >>/tmp/postgresql.conf
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]] && echo "pg_tde.wal_encrypt = on" >>/tmp/postgresql.conf
+    [[ "${TDE_ENFORCE:-false}" == "true" ]] && echo "pg_tde.enforce_encryption = on" >>/tmp/postgresql.conf
+    [[ "${TDE_DEFAULT_AM:-false}" == "true" ]] && echo "default_table_access_method = tde_heap" >>/tmp/postgresql.conf
+    echo "pg_tde.cipher = '${TDE_CIPHER:-aes_128}'" >>/tmp/postgresql.conf
+fi
 
 if [ "$STANDBY" == "hot" ]; then
     echo "hot_standby = on" >>/tmp/postgresql.conf
