@@ -73,9 +73,9 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     [[ "${TDE_ENABLED:-false}" == "true" ]] && BASEBACKUP=pg_tde_basebackup
     echo "pg_tde: seeding standby with '$BASEBACKUP' (TDE_ENABLED=${TDE_ENABLED:-false})"
     if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        "$BASEBACKUP" -X fetch --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key"
+        "$BASEBACKUP" -Xs --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key"
     else
-        "$BASEBACKUP" -X fetch --no-password --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST"
+        "$BASEBACKUP" -Xs --no-password --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST"
     fi
 fi
 
