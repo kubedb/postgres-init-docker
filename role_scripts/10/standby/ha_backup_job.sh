@@ -60,10 +60,13 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     mkdir -p "$PGDATA"
     rm -rf "$PGDATA"/*
     chmod 0700 "$PGDATA"
+    BASEBACKUP=pg_basebackup
+    [[ "${TDE_ENABLED:-false}" == "true" ]] && BASEBACKUP=pg_tde_basebackup
+    echo "pg_tde: seeding standby with '$BASEBACKUP' (TDE_ENABLED=${TDE_ENABLED:-false})"
     if [[ "${SSL:-0}" == "ON" ]]; then
-        pg_basebackup -X fetch --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
+        "$BASEBACKUP" -X fetch --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST" -d "sslmode=$SSL_MODE sslrootcert=/tls/certs/client/ca.crt sslcert=/tls/certs/client/client.crt sslkey=/tls/certs/client/client.key"
     else
-        pg_basebackup -X fetch --no-password --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST"
+        "$BASEBACKUP" -X fetch --no-password --pgdata "$PGDATA" --username=postgres --progress --host="$PRIMARY_HOST"
     fi
 fi
 
@@ -84,7 +87,17 @@ else
   echo "wal_keep_segments = 160" >>/tmp/postgresql.conf
 fi
 
-echo "shared_preload_libraries = 'pg_stat_statements'" >>/tmp/postgresql.conf
+PRELOAD="pg_stat_statements"
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    PRELOAD="${TDE_EXTENSION:-pg_tde},${PRELOAD}"
+fi
+echo "shared_preload_libraries = '${PRELOAD}'" >>/tmp/postgresql.conf
+if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
+    [[ "${TDE_ENCRYPT_WAL:-false}" == "true" ]] && echo "pg_tde.wal_encrypt = on" >>/tmp/postgresql.conf
+    [[ "${TDE_ENFORCE:-false}" == "true" ]] && echo "pg_tde.enforce_encryption = on" >>/tmp/postgresql.conf
+    [[ "${TDE_DEFAULT_AM:-false}" == "true" ]] && echo "default_table_access_method = tde_heap" >>/tmp/postgresql.conf
+    echo "pg_tde.cipher = '${TDE_CIPHER:-aes_128}'" >>/tmp/postgresql.conf
+fi
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 echo "wal_log_hints = on" >>/tmp/postgresql.conf
 
@@ -98,24 +111,35 @@ else
 fi
 if [[ "$STREAMING" == "synchronous" ]]; then
     # setup synchronous streaming replication
-    echo "synchronous_commit = remote_write" >>/tmp/postgresql.conf
+    echo "synchronous_commit = ${SYNC_COMMIT_LEVEL:-remote_write}" >>/tmp/postgresql.conf
 
-    # https://stackoverflow.com/a/44092231/244009
-    self_idx=$(echo $HOSTNAME | grep -Eo '[0-9]+$')
-    echo "$self_idx"
+    if [[ "${SYNC_USE_WILDCARD:-false}" == "true" ]]; then
+        names="*"
+    elif [[ -n "${SYNC_STANDBY_NAMES:-}" ]]; then
+        names=""
+        IFS=',' read -ra _standby_list <<< "$SYNC_STANDBY_NAMES"
+        for _name in "${_standby_list[@]}"; do
+            names+="\"${_name}\"",
+        done
+        names="${names%,}"
+    else
+        # https://stackoverflow.com/a/44092231/244009
+        self_idx=${HOSTNAME##*[!0-9]}
+        echo "$self_idx"
 
-    shopt -s extglob
-    sts_prefix=${HOSTNAME%%+([0-9])}
-    names=""
-    for ((i = 0; i < $REPLICAS; i++)); do
-        if [[ $self_idx == $i ]]; then
-            echo "skip $i"
-        else
-            names+="\"$sts_prefix$i\","
-        fi
-    done
-    names=$(echo "$names" | rev | cut -c2- | rev)
-    echo "synchronous_standby_names = 'ANY 1 ("$names")'" >>/tmp/postgresql.conf
+        shopt -s extglob
+        sts_prefix=${HOSTNAME%%+([0-9])}
+        names=""
+        for ((i = 0; i < $REPLICAS; i++)); do
+            if [[ $self_idx == $i ]]; then
+                echo "skip $i"
+            else
+                names+="\"$sts_prefix$i\"",
+            fi
+        done
+        names=${names%,}
+    fi
+    echo "synchronous_standby_names = '${SYNC_REPLICATION_MODE:-ANY} ${NUM_SYNC_REPLICAS:-1} ("$names")'" >>/tmp/postgresql.conf
 fi
 if [[ "${SSL:-0}" == "ON" ]]; then
     echo "ssl = on" >>/tmp/postgresql.conf
