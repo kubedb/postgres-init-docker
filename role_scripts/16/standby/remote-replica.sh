@@ -16,6 +16,7 @@
 
 export PASSWORD
 set -eou pipefail
+export PRIMARY_PORT=${PRIMARY_PORT:-5432}
 
 echo "Running as Remote Replica"
 
@@ -27,9 +28,9 @@ while true; do
     echo "Attempting pg_isready on primary"
 
     if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        pg_isready --host="$PRIMARY_HOST" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key" --username=$PRIMARY_USER_NAME --timeout=2 &>/dev/null && break
+        pg_isready --host="$PRIMARY_HOST" --port="$PRIMARY_PORT" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key" --username=$PRIMARY_USER_NAME --timeout=2 &>/dev/null && break
     else
-        pg_isready --host="$PRIMARY_HOST" --username=$PRIMARY_USER_NAME --timeout=2 &>/dev/null && break
+        pg_isready --host="$PRIMARY_HOST" --port="$PRIMARY_PORT" --username=$PRIMARY_USER_NAME --timeout=2 &>/dev/null && break
     fi
     sleep 2
 done
@@ -37,9 +38,9 @@ done
 while true; do
     echo "Attempting query on primary"
     if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        psql -h "$PRIMARY_HOST" --username=$PRIMARY_USER_NAME -d "dbname=postgres sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key" --command="select now();" &>/dev/null && break
+        psql -h "$PRIMARY_HOST" -p "$PRIMARY_PORT" --username=$PRIMARY_USER_NAME -d "dbname=postgres sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key" --command="select now();" &>/dev/null && break
     else
-        psql -h "$PRIMARY_HOST" --username=$PRIMARY_USER_NAME -d postgres --no-password --command="select now();" &>/dev/null && break
+        psql -h "$PRIMARY_HOST" -p "$PRIMARY_PORT" --username=$PRIMARY_USER_NAME -d postgres --no-password --command="select now();" &>/dev/null && break
     fi
 
     sleep 2
@@ -73,9 +74,9 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     [[ "${TDE_ENABLED:-false}" == "true" ]] && BASEBACKUP=pg_tde_basebackup
     echo "pg_tde: seeding standby with '$BASEBACKUP' (TDE_ENABLED=${TDE_ENABLED:-false})"
     if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        "$BASEBACKUP" -X fetch --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key"
+        "$BASEBACKUP" -Xs --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" --port="$PRIMARY_PORT" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key"
     else
-        "$BASEBACKUP" -X fetch --no-password --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST"
+        "$BASEBACKUP" -Xs --no-password --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" --port="$PRIMARY_PORT"
     fi
 fi
 
@@ -142,9 +143,9 @@ fi
 echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
 # primary_conninfo is used for streaming replication
 if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key'" >>/tmp/postgresql.conf
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST port=$PRIMARY_PORT user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key'" >>/tmp/postgresql.conf
 else
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD'" >>/tmp/postgresql.conf
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST port=$PRIMARY_PORT user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD'" >>/tmp/postgresql.conf
 fi
 
 cat /run_scripts/role/postgresql.conf >>/tmp/postgresql.conf
