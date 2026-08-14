@@ -177,6 +177,13 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         { echo 'hostssl    replication     all             127.0.0.1/32            cert clientcert=verify-full'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    replication     all             ::1/128                 cert clientcert=verify-full'; } >>/tmp/pg_hba.conf
 
+        # KubeDB: user-supplied pg_hba rules (configSecret key: user_hba.conf).
+        # They go before the catch-all rules below (pg_hba.conf is first-match-wins)
+        # and after the local/loopback rules above, so custom rules can override the
+        # defaults but cannot lock out the operator's own scripts.
+        # include_if_exists (PostgreSQL 16+): secret updates apply on config reload.
+        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
+
         { echo 'hostssl    all             all             0.0.0.0/0               cert clientcert=verify-full'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        0.0.0.0/0               cert clientcert=verify-full'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    all             all             ::/0                    cert clientcert=verify-full'; } >>/tmp/pg_hba.conf
@@ -191,6 +198,13 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         { echo 'hostssl    replication     all             127.0.0.1/32            scram-sha-256'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    replication     all             ::1/128                 scram-sha-256'; } >>/tmp/pg_hba.conf
 
+        # KubeDB: user-supplied pg_hba rules (configSecret key: user_hba.conf).
+        # They go before the catch-all rules below (pg_hba.conf is first-match-wins)
+        # and after the local/loopback rules above, so custom rules can override the
+        # defaults but cannot lock out the operator's own scripts.
+        # include_if_exists (PostgreSQL 16+): secret updates apply on config reload.
+        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
+
         { echo 'hostssl    all             all             0.0.0.0/0               scram-sha-256'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        0.0.0.0/0               scram-sha-256'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    all             all             ::/0                    scram-sha-256'; } >>/tmp/pg_hba.conf
@@ -204,6 +218,13 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         { echo 'local      replication     all                                     trust'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    replication     all             127.0.0.1/32            md5'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    replication     all             ::1/128                 md5'; } >>/tmp/pg_hba.conf
+
+        # KubeDB: user-supplied pg_hba rules (configSecret key: user_hba.conf).
+        # They go before the catch-all rules below (pg_hba.conf is first-match-wins)
+        # and after the local/loopback rules above, so custom rules can override the
+        # defaults but cannot lock out the operator's own scripts.
+        # include_if_exists (PostgreSQL 16+): secret updates apply on config reload.
+        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
 
         { echo 'hostssl    all             all             0.0.0.0/0               md5'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        0.0.0.0/0               md5'; } >>/tmp/pg_hba.conf
@@ -222,6 +243,13 @@ else
         { echo 'host         replication     all             127.0.0.1/32            scram-sha-256'; } >>/tmp/pg_hba.conf
         { echo 'host         replication     all             ::1/128                 scram-sha-256'; } >>/tmp/pg_hba.conf
 
+        # KubeDB: user-supplied pg_hba rules (configSecret key: user_hba.conf).
+        # They go before the catch-all rules below (pg_hba.conf is first-match-wins)
+        # and after the local/loopback rules above, so custom rules can override the
+        # defaults but cannot lock out the operator's own scripts.
+        # include_if_exists (PostgreSQL 16+): secret updates apply on config reload.
+        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
+
         { echo 'host         all             all             0.0.0.0/0               scram-sha-256'; } >>/tmp/pg_hba.conf
         { echo 'host         replication     postgres        0.0.0.0/0               scram-sha-256'; } >>/tmp/pg_hba.conf
         { echo 'host         all             all             ::/0                    scram-sha-256'; } >>/tmp/pg_hba.conf
@@ -235,6 +263,13 @@ else
         { echo 'local        replication     all                                     trust'; } >>/tmp/pg_hba.conf
         { echo 'host         replication     all             127.0.0.1/32            md5'; } >>/tmp/pg_hba.conf
         { echo 'host         replication     all             ::1/128                 md5'; } >>/tmp/pg_hba.conf
+
+        # KubeDB: user-supplied pg_hba rules (configSecret key: user_hba.conf).
+        # They go before the catch-all rules below (pg_hba.conf is first-match-wins)
+        # and after the local/loopback rules above, so custom rules can override the
+        # defaults but cannot lock out the operator's own scripts.
+        # include_if_exists (PostgreSQL 16+): secret updates apply on config reload.
+        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
 
         { echo 'host         all             all             0.0.0.0/0               md5'; } >>/tmp/pg_hba.conf
         { echo 'host         replication     postgres        0.0.0.0/0               md5'; } >>/tmp/pg_hba.conf
