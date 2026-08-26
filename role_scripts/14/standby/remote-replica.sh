@@ -82,6 +82,11 @@ fi
 
 # setup postgresql.conf
 touch /tmp/postgresql.conf
+
+if [[ "${TUNING_ENABLED:-}" == "true" ]]; then
+  echo "include_if_exists = '${TUNING_FILE_PATH:-/etc/config/pgtune.conf}'" >>/tmp/postgresql.conf
+fi
+
 echo "wal_level = replica" >>/tmp/postgresql.conf
 echo "shared_buffers = $SHARED_BUFFERS" >>/tmp/postgresql.conf
 echo "max_wal_senders = 90" >>/tmp/postgresql.conf # default is 10.  value must be less than max_connections minus superuser_reserved_connections. ref: https://www.postgresql.org/docs/11/runtime-config-replication.html#GUC-MAX-WAL-SENDERS
