@@ -46,10 +46,24 @@ if [[ "${REPLICAS:-1}" -gt 1 && "$POD_ORDINAL" != "0" ]]; then
     # script working against an operator that predates it.
     UPSTREAM_HOST="${PETSET_BASE}-0.${GOVERNING_SERVICE_DNS:-${PETSET_BASE}-pods.${NAMESPACE}.svc}"
     UPSTREAM_PORT="5432"
-    # Ordinal 0's catalog is a byte copy of the source's, so the credentials the
-    # operator gave us -- which must match the source's -- authenticate there too.
-    UPSTREAM_USER="${POSTGRES_USER:-postgres}"
-    UPSTREAM_PASSWORD="${POSTGRES_PASSWORD:-}"
+    # Authenticate to ordinal 0 with the SOURCE's replication user, not the local
+    # one. Ordinal 0's pg_authid is a byte copy of the source's, so the source's
+    # user is the only one guaranteed to be present there AND to hold REPLICATION
+    # -- it is by definition the user the source DBA gave us to base-backup with.
+    # The local POSTGRES_USER carries no such guarantee: on a migration where the
+    # client hands over a restricted user instead of their superuser, it may not
+    # exist in the copied catalog at all.
+    #
+    # cert is the exception: clientcert=verify-full binds the certificate CN to
+    # the role name, and our client certificate is issued for this cluster's own
+    # user, so that is the only role it can present as.
+    if [[ "${CLIENT_AUTH_MODE:-md5}" == "cert" ]]; then
+        UPSTREAM_USER="${POSTGRES_USER:-postgres}"
+        UPSTREAM_PASSWORD="${POSTGRES_PASSWORD:-}"
+    else
+        UPSTREAM_USER="$PRIMARY_USER_NAME"
+        UPSTREAM_PASSWORD="${PRIMARY_PASSWORD:-}"
+    fi
     # Peer-to-peer inside the cluster presents our own certs, not the source's.
     UPSTREAM_SSL="${SSL:-OFF}"
     UPSTREAM_SSL_MODE="${SSL_MODE:-disable}"
@@ -376,6 +390,30 @@ else
         { echo 'host         replication     postgres        ::/0                    md5'; } >>/tmp/pg_hba.conf
     fi
 
+fi
+
+# ---------------------------------------------------------------------------
+# Permit the source's replication user, not just the literal "postgres".
+#
+# Every replication rule emitted above names "postgres" explicitly. PostgreSQL
+# does not match a replication connection against `all` in the DATABASE column,
+# so when the source's replication user is anything else, a cascaded peer is
+# refused before authentication even happens:
+#
+#   FATAL: no pg_hba.conf entry for replication connection
+#          from host "10.x.x.x", user "migrator", no encryption
+#
+# Clone each postgres replication rule for that user rather than re-deriving the
+# auth method per mode, so these rules cannot drift from the ones above.
+# ---------------------------------------------------------------------------
+if [[ -n "${PRIMARY_USER_NAME:-}" && "$PRIMARY_USER_NAME" != "postgres" ]]; then
+    echo "pg_hba: cloning replication rules for the source user '$PRIMARY_USER_NAME'"
+    awk -v u="$PRIMARY_USER_NAME" '
+        $1 ~ /^host(ssl)?$/ && $2 == "replication" && $3 == "postgres" {
+            $3 = u; print
+        }' /tmp/pg_hba.conf >/tmp/pg_hba_extra.conf
+    cat /tmp/pg_hba_extra.conf >>/tmp/pg_hba.conf
+    rm -f /tmp/pg_hba_extra.conf
 fi
 
 mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
