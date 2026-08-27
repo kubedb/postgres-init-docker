@@ -117,19 +117,45 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     else
         "$BASEBACKUP" -Xs --no-password --pgdata "$PGDATA" --username=$UPSTREAM_USER --progress --host="$UPSTREAM_HOST" --port="$UPSTREAM_PORT"
     fi
-
-    # pg_basebackup copies the upstream's postgresql.auto.conf verbatim, and
-    # Postgres reads that file AFTER postgresql.conf -- so anything ALTER
-    # SYSTEM'd upstream silently overrides the recovery configuration written
-    # below, including the primary_conninfo and primary_slot_name an external
-    # manager such as repmgr or patroni leaves there. We pass no -R, so nothing
-    # we depend on lives in that file: start from empty.
-    if [[ -s "$PGDATA/postgresql.auto.conf" ]]; then
-        echo "clearing inherited postgresql.auto.conf; it contained:"
-        sed 's/^/  | /' "$PGDATA/postgresql.auto.conf"
-    fi
-    : >"$PGDATA/postgresql.auto.conf"
 fi
+
+# ---------------------------------------------------------------------------
+# Strip inherited recovery settings from postgresql.auto.conf.
+#
+# pg_basebackup copies the upstream's $PGDATA/postgresql.auto.conf verbatim, and
+# Postgres reads that file AFTER postgresql.conf -- so anything ALTER SYSTEM'd
+# upstream silently overrides the recovery configuration written below. On a
+# repmgr- or patroni-managed source that means primary_conninfo and
+# primary_slot_name pointing at the manager's own topology, and streaming then
+# fails for a slot that was never ours:
+#
+#   FATAL: could not start WAL streaming:
+#   ERROR: replication slot "repmgr_slot_1" does not exist
+#
+# retried forever, which is what a repeating 'started streaming WAL from
+# primary at <LSN>' with no progress actually is.
+#
+# This runs on EVERY start, not only when seeding, because the seed is not the
+# only thing that puts a foreign auto.conf in $PGDATA: the coordinator's own
+# re-seed (pg_basebackup) and pg_rewind both copy from the upstream, and both
+# leave PGDATA populated so the seed block above is skipped entirely.
+#
+# Only the keys KubeDB authors itself are removed; everything else -- a user's
+# own ALTER SYSTEM -- is preserved, so this is safe to run unconditionally.
+# ---------------------------------------------------------------------------
+sanitize_auto_conf() {
+    local f="$PGDATA/postgresql.auto.conf"
+    [[ -s "$f" ]] || return 0
+    local pattern='^[[:space:]]*(primary_conninfo|primary_slot_name|restore_command|recovery_target[a-z_]*|recovery_min_apply_delay|archive_mode|archive_command|archive_library)[[:space:]]*='
+    if ! grep -Eq "$pattern" "$f"; then
+        return 0
+    fi
+    echo "stripping inherited recovery settings from postgresql.auto.conf:"
+    grep -E "$pattern" "$f" | sed 's/password=[^ '"'"']*/password=<redacted>/g; s/^/  | /'
+    grep -Ev "$pattern" "$f" >"$f.kubedb-tmp"
+    mv "$f.kubedb-tmp" "$f"
+}
+sanitize_auto_conf
 
 # setup postgresql.conf
 touch /tmp/postgresql.conf
