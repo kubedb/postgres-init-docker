@@ -20,27 +20,66 @@ export PRIMARY_PORT=${PRIMARY_PORT:-5432}
 
 echo "Running as Remote Replica"
 
+# ---------------------------------------------------------------------------
+# Upstream selection: cascading replication for a multi-replica remote replica.
+#
+# Ordinal 0 is the only pod that talks to the external source. Every other pod
+# streams from ordinal 0 instead, so exactly one base backup and one WAL stream
+# cross the WAN to the client's database rather than one per replica.
+#
+# The topology is also the one we want after cutover: promoting ordinal 0 turns
+# the existing cascade into an ordinary primary-with-standbys tree, with no
+# re-seed of the followers.
+# ---------------------------------------------------------------------------
+POD_ORDINAL="${HOSTNAME##*-}"
+UPSTREAM_HOST="$PRIMARY_HOST"
+UPSTREAM_PORT="$PRIMARY_PORT"
+UPSTREAM_USER="$PRIMARY_USER_NAME"
+UPSTREAM_PASSWORD="${PRIMARY_PASSWORD:-}"
+UPSTREAM_SSL="${SOURCE_SSL:-OFF}"
+UPSTREAM_SSL_MODE="${SOURCE_SSL_MODE:-disable}"
+UPSTREAM_TLS_DIR="/tls/certs/remote"
+
+if [[ "${REPLICAS:-1}" -gt 1 && "$POD_ORDINAL" != "0" ]]; then
+    PETSET_BASE="${HOSTNAME%-*}"
+    # GOVERNING_SERVICE_DNS is supplied by the operator; the fallback keeps this
+    # script working against an operator that predates it.
+    UPSTREAM_HOST="${PETSET_BASE}-0.${GOVERNING_SERVICE_DNS:-${PETSET_BASE}-pods.${NAMESPACE}.svc}"
+    UPSTREAM_PORT="5432"
+    # Ordinal 0's catalog is a byte copy of the source's, so the credentials the
+    # operator gave us -- which must match the source's -- authenticate there too.
+    UPSTREAM_USER="${POSTGRES_USER:-postgres}"
+    UPSTREAM_PASSWORD="${POSTGRES_PASSWORD:-}"
+    # Peer-to-peer inside the cluster presents our own certs, not the source's.
+    UPSTREAM_SSL="${SSL:-OFF}"
+    UPSTREAM_SSL_MODE="${SSL_MODE:-disable}"
+    UPSTREAM_TLS_DIR="/tls/certs/client"
+    echo "cascade: ordinal $POD_ORDINAL follows $UPSTREAM_HOST:$UPSTREAM_PORT (not the external source)"
+else
+    echo "cascade: ordinal $POD_ORDINAL follows the external source $UPSTREAM_HOST:$UPSTREAM_PORT"
+fi
+
 # set password ENV
-export PGPASSWORD=${PRIMARY_PASSWORD:-}
+export PGPASSWORD=${UPSTREAM_PASSWORD:-}
 
 # Waiting for running Postgres
 while true; do
     echo "Attempting pg_isready on primary"
 
-    if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        pg_isready --host="$PRIMARY_HOST" --port="$PRIMARY_PORT" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key" --username=$PRIMARY_USER_NAME --timeout=2 &>/dev/null && break
+    if [[ "${UPSTREAM_SSL:-0}" == "ON" ]]; then
+        pg_isready --host="$UPSTREAM_HOST" --port="$UPSTREAM_PORT" -d "sslmode=$UPSTREAM_SSL_MODE sslrootcert=${UPSTREAM_TLS_DIR}/ca.crt sslcert=${UPSTREAM_TLS_DIR}/client.crt sslkey=${UPSTREAM_TLS_DIR}/client.key" --username=$UPSTREAM_USER --timeout=2 &>/dev/null && break
     else
-        pg_isready --host="$PRIMARY_HOST" --port="$PRIMARY_PORT" --username=$PRIMARY_USER_NAME --timeout=2 &>/dev/null && break
+        pg_isready --host="$UPSTREAM_HOST" --port="$UPSTREAM_PORT" --username=$UPSTREAM_USER --timeout=2 &>/dev/null && break
     fi
     sleep 2
 done
 
 while true; do
     echo "Attempting query on primary"
-    if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        psql -h "$PRIMARY_HOST" -p "$PRIMARY_PORT" --username=$PRIMARY_USER_NAME -d "dbname=postgres sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key" --command="select now();" &>/dev/null && break
+    if [[ "${UPSTREAM_SSL:-0}" == "ON" ]]; then
+        psql -h "$UPSTREAM_HOST" -p "$UPSTREAM_PORT" --username=$UPSTREAM_USER -d "dbname=postgres sslmode=$UPSTREAM_SSL_MODE sslrootcert=${UPSTREAM_TLS_DIR}/ca.crt sslcert=${UPSTREAM_TLS_DIR}/client.crt sslkey=${UPSTREAM_TLS_DIR}/client.key" --command="select now();" &>/dev/null && break
     else
-        psql -h "$PRIMARY_HOST" -p "$PRIMARY_PORT" --username=$PRIMARY_USER_NAME -d postgres --no-password --command="select now();" &>/dev/null && break
+        psql -h "$UPSTREAM_HOST" -p "$UPSTREAM_PORT" --username=$UPSTREAM_USER -d postgres --no-password --command="select now();" &>/dev/null && break
     fi
 
     sleep 2
@@ -73,11 +112,23 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     BASEBACKUP=pg_basebackup
     [[ "${TDE_ENABLED:-false}" == "true" ]] && BASEBACKUP=pg_tde_basebackup
     echo "pg_tde: seeding standby with '$BASEBACKUP' (TDE_ENABLED=${TDE_ENABLED:-false})"
-    if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        "$BASEBACKUP" -Xs --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" --port="$PRIMARY_PORT" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key"
+    if [[ "${UPSTREAM_SSL:-0}" == "ON" ]]; then
+        "$BASEBACKUP" -Xs --pgdata "$PGDATA" --username=$UPSTREAM_USER --progress --host="$UPSTREAM_HOST" --port="$UPSTREAM_PORT" -d "sslmode=$UPSTREAM_SSL_MODE sslrootcert=${UPSTREAM_TLS_DIR}/ca.crt sslcert=${UPSTREAM_TLS_DIR}/client.crt sslkey=${UPSTREAM_TLS_DIR}/client.key"
     else
-        "$BASEBACKUP" -Xs --no-password --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" --port="$PRIMARY_PORT"
+        "$BASEBACKUP" -Xs --no-password --pgdata "$PGDATA" --username=$UPSTREAM_USER --progress --host="$UPSTREAM_HOST" --port="$UPSTREAM_PORT"
     fi
+
+    # pg_basebackup copies the upstream's postgresql.auto.conf verbatim, and
+    # Postgres reads that file AFTER postgresql.conf -- so anything ALTER
+    # SYSTEM'd upstream silently overrides the recovery configuration written
+    # below, including the primary_conninfo and primary_slot_name an external
+    # manager such as repmgr or patroni leaves there. We pass no -R, so nothing
+    # we depend on lives in that file: start from empty.
+    if [[ -s "$PGDATA/postgresql.auto.conf" ]]; then
+        echo "clearing inherited postgresql.auto.conf; it contained:"
+        sed 's/^/  | /' "$PGDATA/postgresql.auto.conf"
+    fi
+    : >"$PGDATA/postgresql.auto.conf"
 fi
 
 # setup postgresql.conf
@@ -152,10 +203,10 @@ if [[ "$WAL_LIMIT_POLICY" == "ReplicationSlot" ]]; then
     CONNINFO_DBNAME=" dbname=postgres"
 fi
 
-if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST port=$PRIMARY_PORT user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key$CONNINFO_DBNAME'" >>/tmp/postgresql.conf
+if [[ "${UPSTREAM_SSL:-0}" == "ON" ]]; then
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$UPSTREAM_HOST port=$UPSTREAM_PORT user=$UPSTREAM_USER password=$UPSTREAM_PASSWORD sslmode=$UPSTREAM_SSL_MODE sslrootcert=${UPSTREAM_TLS_DIR}/ca.crt sslcert=${UPSTREAM_TLS_DIR}/client.crt sslkey=${UPSTREAM_TLS_DIR}/client.key$CONNINFO_DBNAME'" >>/tmp/postgresql.conf
 else
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST port=$PRIMARY_PORT user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD$CONNINFO_DBNAME'" >>/tmp/postgresql.conf
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$UPSTREAM_HOST port=$UPSTREAM_PORT user=$UPSTREAM_USER password=$UPSTREAM_PASSWORD$CONNINFO_DBNAME'" >>/tmp/postgresql.conf
 fi
 
 cat /run_scripts/role/postgresql.conf >>/tmp/postgresql.conf
