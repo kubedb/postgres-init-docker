@@ -166,7 +166,20 @@ sanitize_auto_conf() {
     fi
     echo "stripping inherited recovery settings from postgresql.auto.conf:"
     grep -E "$pattern" "$f" | sed 's/password=[^ '"'"']*/password=<redacted>/g; s/^/  | /'
-    grep -Ev "$pattern" "$f" >"$f.kubedb-tmp"
+    # grep exits 1 when it selects no lines, which here means every line was a
+    # stripped key -- a normal outcome (an upstream managed entirely by repmgr or
+    # patroni has nothing else in the file), not an error. Under `set -e` the bare
+    # pipeline aborted the script at this point: postgres never started, the
+    # supervisor re-ran the role script, and it aborted again, forever -- with the
+    # container still reporting Ready. Only exit >1 is a real grep failure, and
+    # there we leave the file untouched rather than install a truncated one.
+    local rc=0
+    grep -Ev "$pattern" "$f" >"$f.kubedb-tmp" || rc=$?
+    if ((rc > 1)); then
+        echo "  ! grep failed (exit $rc); leaving postgresql.auto.conf unchanged"
+        rm -f "$f.kubedb-tmp"
+        return 0
+    fi
     mv "$f.kubedb-tmp" "$f"
 }
 sanitize_auto_conf
