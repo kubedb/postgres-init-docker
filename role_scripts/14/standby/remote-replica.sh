@@ -20,27 +20,80 @@ export PRIMARY_PORT=${PRIMARY_PORT:-5432}
 
 echo "Running as Remote Replica"
 
+# ---------------------------------------------------------------------------
+# Upstream selection: cascading replication for a multi-replica remote replica.
+#
+# Ordinal 0 is the only pod that talks to the external source. Every other pod
+# streams from ordinal 0 instead, so exactly one base backup and one WAL stream
+# cross the WAN to the client's database rather than one per replica.
+#
+# The topology is also the one we want after cutover: promoting ordinal 0 turns
+# the existing cascade into an ordinary primary-with-standbys tree, with no
+# re-seed of the followers.
+# ---------------------------------------------------------------------------
+POD_ORDINAL="${HOSTNAME##*-}"
+UPSTREAM_HOST="$PRIMARY_HOST"
+UPSTREAM_PORT="$PRIMARY_PORT"
+UPSTREAM_USER="$PRIMARY_USER_NAME"
+UPSTREAM_PASSWORD="${PRIMARY_PASSWORD:-}"
+UPSTREAM_SSL="${SOURCE_SSL:-OFF}"
+UPSTREAM_SSL_MODE="${SOURCE_SSL_MODE:-disable}"
+UPSTREAM_TLS_DIR="/tls/certs/remote"
+
+if [[ "${REPLICAS:-1}" -gt 1 && "$POD_ORDINAL" != "0" ]]; then
+    PETSET_BASE="${HOSTNAME%-*}"
+    # GOVERNING_SERVICE_DNS is supplied by the operator; the fallback keeps this
+    # script working against an operator that predates it.
+    UPSTREAM_HOST="${PETSET_BASE}-0.${GOVERNING_SERVICE_DNS:-${PETSET_BASE}-pods.${NAMESPACE}.svc}"
+    UPSTREAM_PORT="5432"
+    # Authenticate to ordinal 0 with the SOURCE's replication user, not the local
+    # one. Ordinal 0's pg_authid is a byte copy of the source's, so the source's
+    # user is the only one guaranteed to be present there AND to hold REPLICATION
+    # -- it is by definition the user the source DBA gave us to base-backup with.
+    # The local POSTGRES_USER carries no such guarantee: on a migration where the
+    # client hands over a restricted user instead of their superuser, it may not
+    # exist in the copied catalog at all.
+    #
+    # cert is the exception: clientcert=verify-full binds the certificate CN to
+    # the role name, and our client certificate is issued for this cluster's own
+    # user, so that is the only role it can present as.
+    if [[ "${CLIENT_AUTH_MODE:-md5}" == "cert" ]]; then
+        UPSTREAM_USER="${POSTGRES_USER:-postgres}"
+        UPSTREAM_PASSWORD="${POSTGRES_PASSWORD:-}"
+    else
+        UPSTREAM_USER="$PRIMARY_USER_NAME"
+        UPSTREAM_PASSWORD="${PRIMARY_PASSWORD:-}"
+    fi
+    # Peer-to-peer inside the cluster presents our own certs, not the source's.
+    UPSTREAM_SSL="${SSL:-OFF}"
+    UPSTREAM_SSL_MODE="${SSL_MODE:-disable}"
+    UPSTREAM_TLS_DIR="/tls/certs/client"
+    echo "cascade: ordinal $POD_ORDINAL follows $UPSTREAM_HOST:$UPSTREAM_PORT (not the external source)"
+else
+    echo "cascade: ordinal $POD_ORDINAL follows the external source $UPSTREAM_HOST:$UPSTREAM_PORT"
+fi
+
 # set password ENV
-export PGPASSWORD=${PRIMARY_PASSWORD:-}
+export PGPASSWORD=${UPSTREAM_PASSWORD:-}
 
 # Waiting for running Postgres
 while true; do
     echo "Attempting pg_isready on primary"
 
-    if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        pg_isready --host="$PRIMARY_HOST" --port="$PRIMARY_PORT" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key" --username=$PRIMARY_USER_NAME --timeout=2 &>/dev/null && break
+    if [[ "${UPSTREAM_SSL:-0}" == "ON" ]]; then
+        pg_isready --host="$UPSTREAM_HOST" --port="$UPSTREAM_PORT" -d "sslmode=$UPSTREAM_SSL_MODE sslrootcert=${UPSTREAM_TLS_DIR}/ca.crt sslcert=${UPSTREAM_TLS_DIR}/client.crt sslkey=${UPSTREAM_TLS_DIR}/client.key" --username=$UPSTREAM_USER --timeout=2 &>/dev/null && break
     else
-        pg_isready --host="$PRIMARY_HOST" --port="$PRIMARY_PORT" --username=$PRIMARY_USER_NAME --timeout=2 &>/dev/null && break
+        pg_isready --host="$UPSTREAM_HOST" --port="$UPSTREAM_PORT" --username=$UPSTREAM_USER --timeout=2 &>/dev/null && break
     fi
     sleep 2
 done
 
 while true; do
     echo "Attempting query on primary"
-    if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        psql -h "$PRIMARY_HOST" -p "$PRIMARY_PORT" --username=$PRIMARY_USER_NAME -d "dbname=postgres sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key" --command="select now();" &>/dev/null && break
+    if [[ "${UPSTREAM_SSL:-0}" == "ON" ]]; then
+        psql -h "$UPSTREAM_HOST" -p "$UPSTREAM_PORT" --username=$UPSTREAM_USER -d "dbname=postgres sslmode=$UPSTREAM_SSL_MODE sslrootcert=${UPSTREAM_TLS_DIR}/ca.crt sslcert=${UPSTREAM_TLS_DIR}/client.crt sslkey=${UPSTREAM_TLS_DIR}/client.key" --command="select now();" &>/dev/null && break
     else
-        psql -h "$PRIMARY_HOST" -p "$PRIMARY_PORT" --username=$PRIMARY_USER_NAME -d postgres --no-password --command="select now();" &>/dev/null && break
+        psql -h "$UPSTREAM_HOST" -p "$UPSTREAM_PORT" --username=$UPSTREAM_USER -d postgres --no-password --command="select now();" &>/dev/null && break
     fi
 
     sleep 2
@@ -73,12 +126,63 @@ if [[ ! -e "$PGDATA/PG_VERSION" ]]; then
     BASEBACKUP=pg_basebackup
     [[ "${TDE_ENABLED:-false}" == "true" ]] && BASEBACKUP=pg_tde_basebackup
     echo "pg_tde: seeding standby with '$BASEBACKUP' (TDE_ENABLED=${TDE_ENABLED:-false})"
-    if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-        "$BASEBACKUP" -Xs --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" --port="$PRIMARY_PORT" -d "sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key"
+    if [[ "${UPSTREAM_SSL:-0}" == "ON" ]]; then
+        "$BASEBACKUP" -Xs --pgdata "$PGDATA" --username=$UPSTREAM_USER --progress --host="$UPSTREAM_HOST" --port="$UPSTREAM_PORT" -d "sslmode=$UPSTREAM_SSL_MODE sslrootcert=${UPSTREAM_TLS_DIR}/ca.crt sslcert=${UPSTREAM_TLS_DIR}/client.crt sslkey=${UPSTREAM_TLS_DIR}/client.key"
     else
-        "$BASEBACKUP" -Xs --no-password --pgdata "$PGDATA" --username=$PRIMARY_USER_NAME --progress --host="$PRIMARY_HOST" --port="$PRIMARY_PORT"
+        "$BASEBACKUP" -Xs --no-password --pgdata "$PGDATA" --username=$UPSTREAM_USER --progress --host="$UPSTREAM_HOST" --port="$UPSTREAM_PORT"
     fi
 fi
+
+# ---------------------------------------------------------------------------
+# Strip inherited recovery settings from postgresql.auto.conf.
+#
+# pg_basebackup copies the upstream's $PGDATA/postgresql.auto.conf verbatim, and
+# Postgres reads that file AFTER postgresql.conf -- so anything ALTER SYSTEM'd
+# upstream silently overrides the recovery configuration written below. On a
+# repmgr- or patroni-managed source that means primary_conninfo and
+# primary_slot_name pointing at the manager's own topology, and streaming then
+# fails for a slot that was never ours:
+#
+#   FATAL: could not start WAL streaming:
+#   ERROR: replication slot "repmgr_slot_1" does not exist
+#
+# retried forever, which is what a repeating 'started streaming WAL from
+# primary at <LSN>' with no progress actually is.
+#
+# This runs on EVERY start, not only when seeding, because the seed is not the
+# only thing that puts a foreign auto.conf in $PGDATA: the coordinator's own
+# re-seed (pg_basebackup) and pg_rewind both copy from the upstream, and both
+# leave PGDATA populated so the seed block above is skipped entirely.
+#
+# Only the keys KubeDB authors itself are removed; everything else -- a user's
+# own ALTER SYSTEM -- is preserved, so this is safe to run unconditionally.
+# ---------------------------------------------------------------------------
+sanitize_auto_conf() {
+    local f="$PGDATA/postgresql.auto.conf"
+    [[ -s "$f" ]] || return 0
+    local pattern='^[[:space:]]*(primary_conninfo|primary_slot_name|restore_command|recovery_target[a-z_]*|recovery_min_apply_delay|archive_mode|archive_command|archive_library)[[:space:]]*='
+    if ! grep -Eq "$pattern" "$f"; then
+        return 0
+    fi
+    echo "stripping inherited recovery settings from postgresql.auto.conf:"
+    grep -E "$pattern" "$f" | sed 's/password=[^ '"'"']*/password=<redacted>/g; s/^/  | /'
+    # grep exits 1 when it selects no lines, which here means every line was a
+    # stripped key -- a normal outcome (an upstream managed entirely by repmgr or
+    # patroni has nothing else in the file), not an error. Under `set -e` the bare
+    # pipeline aborted the script at this point: postgres never started, the
+    # supervisor re-ran the role script, and it aborted again, forever -- with the
+    # container still reporting Ready. Only exit >1 is a real grep failure, and
+    # there we leave the file untouched rather than install a truncated one.
+    local rc=0
+    grep -Ev "$pattern" "$f" >"$f.kubedb-tmp" || rc=$?
+    if ((rc > 1)); then
+        echo "  ! grep failed (exit $rc); leaving postgresql.auto.conf unchanged"
+        rm -f "$f.kubedb-tmp"
+        return 0
+    fi
+    mv "$f.kubedb-tmp" "$f"
+}
+sanitize_auto_conf
 
 # setup postgresql.conf
 touch /tmp/postgresql.conf
@@ -147,10 +251,10 @@ fi
 # ****************** Recovery config **************************
 echo "recovery_target_timeline = 'latest'" >>/tmp/postgresql.conf
 # primary_conninfo is used for streaming replication
-if [[ "${SOURCE_SSL:-0}" == "ON" ]]; then
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST port=$PRIMARY_PORT user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD sslmode=$SOURCE_SSL_MODE sslrootcert=/tls/certs/remote/ca.crt sslcert=/tls/certs/remote/client.crt sslkey=/tls/certs/remote/client.key'" >>/tmp/postgresql.conf
+if [[ "${UPSTREAM_SSL:-0}" == "ON" ]]; then
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$UPSTREAM_HOST port=$UPSTREAM_PORT user=$UPSTREAM_USER password=$UPSTREAM_PASSWORD sslmode=$UPSTREAM_SSL_MODE sslrootcert=${UPSTREAM_TLS_DIR}/ca.crt sslcert=${UPSTREAM_TLS_DIR}/client.crt sslkey=${UPSTREAM_TLS_DIR}/client.key'" >>/tmp/postgresql.conf
 else
-    echo "primary_conninfo = 'application_name=$HOSTNAME host=$PRIMARY_HOST port=$PRIMARY_PORT user=$PRIMARY_USER_NAME password=$PRIMARY_PASSWORD'" >>/tmp/postgresql.conf
+    echo "primary_conninfo = 'application_name=$HOSTNAME host=$UPSTREAM_HOST port=$UPSTREAM_PORT user=$UPSTREAM_USER password=$UPSTREAM_PASSWORD'" >>/tmp/postgresql.conf
 fi
 
 echo "promote_trigger_file = '/run_scripts/tmp/pg-failover-trigger'" >>/tmp/postgresql.conf # [ name whose presence ends recovery]
@@ -299,6 +403,30 @@ else
         { echo 'host         replication     postgres        ::/0                    md5'; } >>/tmp/pg_hba.conf
     fi
 
+fi
+
+# ---------------------------------------------------------------------------
+# Permit the source's replication user, not just the literal "postgres".
+#
+# Every replication rule emitted above names "postgres" explicitly. PostgreSQL
+# does not match a replication connection against `all` in the DATABASE column,
+# so when the source's replication user is anything else, a cascaded peer is
+# refused before authentication even happens:
+#
+#   FATAL: no pg_hba.conf entry for replication connection
+#          from host "10.x.x.x", user "migrator", no encryption
+#
+# Clone each postgres replication rule for that user rather than re-deriving the
+# auth method per mode, so these rules cannot drift from the ones above.
+# ---------------------------------------------------------------------------
+if [[ -n "${PRIMARY_USER_NAME:-}" && "$PRIMARY_USER_NAME" != "postgres" ]]; then
+    echo "pg_hba: cloning replication rules for the source user '$PRIMARY_USER_NAME'"
+    awk -v u="$PRIMARY_USER_NAME" '
+        $1 ~ /^host(ssl)?$/ && $2 == "replication" && $3 == "postgres" {
+            $3 = u; print
+        }' /tmp/pg_hba.conf >/tmp/pg_hba_extra.conf
+    cat /tmp/pg_hba_extra.conf >>/tmp/pg_hba.conf
+    rm -f /tmp/pg_hba_extra.conf
 fi
 
 mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
