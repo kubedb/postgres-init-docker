@@ -2,7 +2,9 @@
 
 LOG_DIR="$PGDATA"/log
 LOG_FILE_PATTERN="postgresql-*.log"
-HOST=$(hostname)
+# bash sets HOSTNAME itself; the hostname binary is absent from the RHEL/CentOS
+# Stream based images, and without it every pod would take the replica path below.
+HOST="$HOSTNAME"
 mkdir -p $PGDATA
 chmod 0700 "$PGDATA"
 
