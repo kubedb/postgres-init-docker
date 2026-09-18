@@ -106,13 +106,16 @@ printf '\n' >>/tmp/postgresql.conf
 # Replaying WAL makes this a standby, so PostgreSQL enforces that these settings are
 # each >= the value recorded in the source's pg_control; otherwise recovery stops with
 #   FATAL: recovery aborted because of insufficient parameter settings
-# On a KubeDB database these are normally raised through the config secret, which is
-# mounted at /etc/config in the DB pod but NOT here -- the role template's
-# `include_if_exists = '/etc/config/user.conf'` therefore resolves to nothing and we
-# would fall back to the built-in defaults (100 / 8 / 64 / 0). Read the real values out
-# of the restored control file instead: pg_controldata reports exactly what the check
-# compares against, so this needs no knowledge of how the source was configured.
-# Appended after the role template so nothing downstream can lower them again.
+# On a KubeDB database these are normally raised through the config secret, which the
+# role template pulls in with `include_if_exists = '/etc/config/user.conf'`. That is
+# the right value in the common case, but it is the CURRENT configuration, not the one
+# the source was running under when the backup was taken -- so restoring an older
+# backup after the secret has been lowered still aborts replay, and the operator has
+# no way to know it will.
+# pg_control does know: it records exactly what the check compares against. Read the
+# values from there, appended after the role template so they take precedence during
+# recovery. This only affects the recovery instance; the restored database starts
+# again from its own configuration afterwards.
 if command -v pg_controldata >/dev/null 2>&1; then
     control_setting() {
         pg_controldata "$PGDATA" 2>/dev/null |
