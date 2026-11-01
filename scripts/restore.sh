@@ -5,6 +5,28 @@ LOG_FILE_PATTERN="postgresql-*.log"
 # bash sets HOSTNAME itself; the hostname binary is absent from the RHEL/CentOS
 # Stream based images, and without it every pod would take the replica path below.
 HOST="$HOSTNAME"
+
+print_logs() {
+  for log_file in "$LOG_DIR"/$LOG_FILE_PATTERN; do
+    echo "---------------------------------------"
+    echo "Outputting contents of: $log_file"
+    cat "$log_file"
+    echo "---------------------------------------"
+  done
+}
+
+# fail exits with an error, so the restore fails instead of waiting forever.
+fail() {
+  echo "restore failed: $*"
+  print_logs
+  exit 1
+}
+
+# postgres stops when recovery ends before its target (the target is past the
+# archived WAL, or a segment cannot be fetched), so a stopped server is a failure.
+check_running() {
+  pg_ctl -D "$PGDATA" status >/dev/null 2>&1 || fail "postgres stopped before reaching the recovery target"
+}
 mkdir -p $PGDATA
 chmod 0700 "$PGDATA"
 
@@ -13,7 +35,7 @@ rm -rf /var/pv/raftwal && rm -rf /var/pv/raftsnapshot
 
 if [[ "${WALG_BASE_BACKUP_NAME:-0}" != "0" ]]; then
     echo "starting to restore from basebackup $WALG_BASE_BACKUP_NAME ..."
-    wal-g backup-fetch $PGDATA $WALG_BASE_BACKUP_NAME
+    wal-g backup-fetch $PGDATA $WALG_BASE_BACKUP_NAME || fail "wal-g backup-fetch $WALG_BASE_BACKUP_NAME"
 fi
 
 # check postgresql veriosn
@@ -113,16 +135,18 @@ mv /tmp/pg_hba.conf "$PGDATA/pg_hba.conf"
 # start postgres
 pg_ctl -D "$PGDATA" -w start
 
+MAX_START_ATTEMPTS=3
+start_attempts=1
 until pg_isready -U postgres; do
   echo "Waiting for pg_isready"
   sleep 3
   if [[ ! -f "$PGDATA/postmaster.pid" ]];then
+    if (( start_attempts >= MAX_START_ATTEMPTS )); then
+      fail "postgres did not start after $start_attempts attempts"
+    fi
+    start_attempts=$((start_attempts + 1))
     pg_ctl -D "$PGDATA" -w start
-    for log_file in "$LOG_DIR"/$LOG_FILE_PATTERN; do
-        cat "$log_file"
-        echo "---------------------------------------"
-        echo "---------------------------------------"
-    done
+    print_logs
   fi
 done
 
@@ -136,6 +160,7 @@ if [[ "$HOST" =~ -0$ ]]; then
       echo "Promotion completed"
       break
     fi
+    check_running
     echo "primary not promoted yet, in_recovery: "$IN_RECOVERY
     sleep 2
   done
@@ -144,25 +169,26 @@ else
   echo "Replica restore mode"
 
   while true; do
+    # without a recovery target (latest) recovery ends with a promotion, not a pause
+    IN_RECOVERY=$(psql -U postgres -Atqc "SELECT pg_is_in_recovery();")
+    if [[ "$IN_RECOVERY" == "f" ]]; then
+      echo "Recovery ended at the end of the archive"
+      break
+    fi
     PAUSED=$(psql -U postgres -Atqc "SELECT pg_is_wal_replay_paused();")
 
     if [[ "$PAUSED" == "t" ]]; then
       echo "Reached recovery target and paused"
       break
     fi
+    check_running
     echo "wal replay not paused yet, paused: "$PAUSED
     sleep 2
   done
 fi
 
 pg_ctl stop -D "$PGDATA" -m fast -w
-# Find and output all log files matching the pattern
-for log_file in "$LOG_DIR"/$LOG_FILE_PATTERN; do
-    echo "---------------------------------------"
-    echo "Outputting contents of: $log_file"
-    cat "$log_file"
-    echo "---------------------------------------"
-done
+print_logs
 
 if [[ -f "$PGDATA/recovery.signal" ]]; then
     rm "$PGDATA/recovery.signal"
