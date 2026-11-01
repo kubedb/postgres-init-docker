@@ -38,6 +38,13 @@ if [[ "${WALG_BASE_BACKUP_NAME:-0}" != "0" ]]; then
     wal-g backup-fetch $PGDATA $WALG_BASE_BACKUP_NAME || fail "wal-g backup-fetch $WALG_BASE_BACKUP_NAME"
 fi
 
+# wal-g retries an unreachable storage for a long time, and postgres calls
+# restore_command once per file, so without a bound a storage outage stalls the
+# restore indefinitely. A fetch that times out reads as "not in the archive":
+# postgres then ends recovery and fails if the target was not reached.
+WAL_FETCH_TIMEOUT="${WAL_FETCH_TIMEOUT:-300}"
+RESTORE_COMMAND="timeout $WAL_FETCH_TIMEOUT wal-g wal-fetch %f %p"
+
 # check postgresql veriosn
 if [[ "$PITR_LSN" != "" ]]; then
   echo "Trying to restore upto lsn: $PITR_LSN commit-time: $PITR_TIME"
@@ -48,7 +55,7 @@ fi
 if [[ "$PG_MAJOR" == "11" ]]; then
     # ****************** Recovery config 11 **************************
     touch /tmp/recovery.conf
-    echo "restore_command = 'wal-g wal-fetch %f %p'" >>/tmp/recovery.conf
+    echo "restore_command = '$RESTORE_COMMAND'" >>/tmp/recovery.conf
     echo "standby_mode = on" >>/tmp/recovery.conf
     echo "trigger_file = '/run_scripts/tmp/pg-failover-trigger'" >>/tmp/recovery.conf # [ name whose presence ends recovery]
     if [[ "${PITR_TIME:-0}" != "latest" ]]; then
@@ -76,7 +83,7 @@ else
 
     # setup postgresql.conf
     touch /tmp/postgresql.conf
-    echo "restore_command = 'wal-g wal-fetch %f %p'" >>/tmp/postgresql.conf
+    echo "restore_command = '$RESTORE_COMMAND'" >>/tmp/postgresql.conf
     if [[ "${PITR_TIME:-0}" != "latest" ]]; then
       if [[ "$PITR_LSN" != "" ]]; then
         echo "recovery_target_lsn = '$PITR_LSN'" >>/tmp/postgresql.conf
