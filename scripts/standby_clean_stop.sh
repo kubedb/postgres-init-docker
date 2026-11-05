@@ -21,7 +21,11 @@
 # mode, replays as a PRIMARY (crash recovery ignores minRecoveryPoint), and writes its own
 # shutdown checkpoint (and, with archiving on, a WAL switch) on the shared timeline.
 #
-# Output contract (last lines): CONSISTENT=<0|1> STARTED=<0|1> STATE=<pg_control state>
+# It only ever signals the server it started itself (tagged with cluster_name, stopped by PID).
+# A server someone else runs in the data directory is left alone and reported as
+# OTHER_RUNNING=1; the caller then sees a state other than "shut down in recovery" and retries.
+#
+# Output contract (last lines): CONSISTENT=<0|1> STARTED=<0|1> OTHER_RUNNING=<0|1> STATE=<pg_control state>
 set -u
 PGDATA_DIR="${1:-${PGDATA:-/var/pv/data}}"
 MAJOR="${2:-$(cut -d. -f1 "$PGDATA_DIR/PG_VERSION" 2>/dev/null)}"
@@ -55,22 +59,63 @@ else
   printf "standby_mode = 'on'\nrecovery_target_timeline = 'latest'\n" >"$PGDATA_DIR/recovery.conf"
 fi
 
-STARTED=0; CONSISTENT=0
+MARK=pgc-standby-clean-stop
+OPTS="$OPTS -c cluster_name=$MARK"
+
+# A process is "alive" if it exists and is not a zombie.
+alive() {
+  [ -n "$1" ] && kill -0 "$1" 2>/dev/null || return 1
+  [ "$(cut -d' ' -f3 "/proc/$1/stat" 2>/dev/null)" != Z ]
+}
+pidfile_pid() { head -n 1 "$PGDATA_DIR/postmaster.pid" 2>/dev/null; }
+# Our server is the one started with cluster_name=$MARK (its command line or, once the
+# title is rewritten, its process title carries the mark).
+ours() { alive "$1" && grep -q "$MARK" "/proc/$1/cmdline" 2>/dev/null; }
+
+STARTED=0; CONSISTENT=0; OTHER_RUNNING=0; OURPID=""
+report() {
+  tail -n 20 "$LOG"
+  echo "CONSISTENT=$CONSISTENT"
+  echo "STARTED=$STARTED"
+  echo "OTHER_RUNNING=$OTHER_RUNNING"
+  echo "STATE=$(pg_controldata "$PGDATA_DIR" | sed -n 's/^Database cluster state: *//p')"
+}
+
+# Never touch a server this script did not start: if one is running, do nothing.
+if alive "$(pidfile_pid)"; then
+  OTHER_RUNNING=1
+  report
+  exit 0
+fi
+
 # with hot_standby=off, pg_ctl -w returns once recovery has started
-if pg_ctl -D "$PGDATA_DIR" -l "$LOG" -o "$OPTS" -w -t 120 start >/dev/null 2>&1; then
-  STARTED=1
+pg_ctl -D "$PGDATA_DIR" -l "$LOG" -o "$OPTS" -w -t 120 start >/dev/null 2>&1
+P="$(pidfile_pid)"
+if ours "$P"; then
+  STARTED=1; OURPID="$P"
+elif alive "$P"; then
+  OTHER_RUNNING=1 # someone else's server took the data directory first
+fi
+
+if [ -n "$OURPID" ]; then
   i=0
   while [ "$i" -lt "$TMO" ]; do
     if grep -q "consistent recovery state reached" "$LOG"; then CONSISTENT=1; break; fi
-    pg_ctl -D "$PGDATA_DIR" status >/dev/null 2>&1 || break
+    alive "$OURPID" || break
     sleep 1; i=$((i + 1))
   done
+  # Stop OUR postmaster by PID (SIGINT = fast shutdown) and wait for THAT process, not for
+  # the pid file: another server may write a new pid file the moment ours exits. A fast
+  # shutdown in recovery only writes a restartpoint, so the wait is generous; immediate
+  # (SIGQUIT) is a last resort, and also only for our own PID.
+  if alive "$OURPID"; then
+    kill -INT "$OURPID" 2>/dev/null
+    i=0; while alive "$OURPID" && [ "$i" -lt 600 ]; do sleep 1; i=$((i + 1)); done
+    if alive "$OURPID"; then
+      kill -QUIT "$OURPID" 2>/dev/null
+      i=0; while alive "$OURPID" && [ "$i" -lt 60 ]; do sleep 1; i=$((i + 1)); done
+    fi
+  fi
+  if alive "$(pidfile_pid)"; then OTHER_RUNNING=1; fi
 fi
-if pg_ctl -D "$PGDATA_DIR" status >/dev/null 2>&1; then
-  pg_ctl -D "$PGDATA_DIR" -w -t 600 stop -m fast >/dev/null 2>&1 ||
-    pg_ctl -D "$PGDATA_DIR" -w -t 60 stop -m immediate >/dev/null 2>&1
-fi
-tail -n 20 "$LOG"
-echo "CONSISTENT=$CONSISTENT"
-echo "STARTED=$STARTED"
-echo "STATE=$(pg_controldata "$PGDATA_DIR" | sed -n 's/^Database cluster state: *//p')"
+report
