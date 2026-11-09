@@ -160,6 +160,11 @@ if [[ "${WAL_BACKUP_TYPE:-0}" == "WALG" ]]; then
 else
     echo "archive_command = '/bin/true'" >>/tmp/postgresql.conf
 fi
+# WAL summaries let pg_basebackup --incremental send only the blocks changed since the parent
+# backup. Standbys summarize the WAL they replay too, so a promoted standby can keep the chain.
+if [[ "${SUMMARIZE_WAL:-off}" == "on" ]]; then
+    echo "summarize_wal = on" >>/tmp/postgresql.conf
+fi
 
 PRELOAD="pg_stat_statements"
 if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
