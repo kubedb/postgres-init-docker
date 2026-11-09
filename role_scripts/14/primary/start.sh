@@ -487,7 +487,14 @@ if [[ "$STREAMING" == "synchronous" ]]; then
         done
         names=${names%,}
     fi
-    echo "synchronous_standby_names = '${SYNC_REPLICATION_MODE:-ANY} ${NUM_SYNC_REPLICAS:-1} ("$names")'" >>/tmp/postgresql.conf
+    # An empty list is a syntax error, not "no sync standbys" -- postgres refuses to start on
+    # 'FIRST 2 ()'. $names is empty whenever this pod is the only member it can see, e.g. a
+    # PITR restore at one replica. Empty means "wait for local flush only", so this is safe.
+    if [[ -z "${names:-}" ]]; then
+        echo "synchronous_standby_names = ''" >>/tmp/postgresql.conf
+    else
+        echo "synchronous_standby_names = '${SYNC_REPLICATION_MODE:-ANY} ${NUM_SYNC_REPLICAS:-1} ("$names")'" >>/tmp/postgresql.conf
+    fi
 fi
 
 # ref: https://superuser.com/a/246841/985093
