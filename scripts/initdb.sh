@@ -50,10 +50,11 @@ else
     fi
 fi
 
-if [[ "$MAJOR_PG_VERSION" == "18" && "$ENABLE_CHECKSUM" != "true" ]];then
+# PG 18+ enables data checksums by default; earlier majors leave them off.
+if [[ "$MAJOR_PG_VERSION" -ge 18 && "$ENABLE_CHECKSUM" != "true" ]];then
     export POSTGRES_INITDB_ARGS="$POSTGRES_INITDB_ARGS --no-data-checksums"
 fi
-if [[ "$MAJOR_PG_VERSION" != "18" && "$ENABLE_CHECKSUM" == "true" ]];then
+if [[ "$MAJOR_PG_VERSION" -lt 18 && "$ENABLE_CHECKSUM" == "true" ]];then
     export POSTGRES_INITDB_ARGS="$POSTGRES_INITDB_ARGS --data-checksums"
 fi
 
