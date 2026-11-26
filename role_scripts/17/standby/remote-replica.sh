@@ -1,4 +1,24 @@
 #!/usr/bin/env bash
+# KubeDB: write the user_hba.conf hook into /tmp/pg_hba.conf.
+# PostgreSQL 16+ can include a file from pg_hba.conf (include_if_exists), so secret updates
+# apply on config reload. A pod on this image can still start on a data directory from an older
+# major: a major upgrade restarts the pod on the new image before pg_upgrade runs, and the
+# older server cannot parse the include. So the splice is chosen from the data directory's own
+# major ($PGDATA/PG_VERSION). A missing PG_VERSION is a fresh data directory: use this image's major.
+kubedb_write_user_hba() {
+    local image_major=17
+    local data_major="$image_major"
+    if [[ -s "${PGDATA:-/var/pv/data}/PG_VERSION" ]]; then
+        data_major=$(cut -d. -f1 "${PGDATA:-/var/pv/data}/PG_VERSION")
+    fi
+    if [[ "$data_major" =~ ^[0-9]+$ ]] && (( data_major >= 16 )); then
+        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
+    elif [[ -s /etc/config/user_hba.conf ]]; then
+        cat /etc/config/user_hba.conf >>/tmp/pg_hba.conf
+        echo '' >>/tmp/pg_hba.conf
+    fi
+}
+
 
 # Copyright AppsCode Inc. and Contributors
 #
@@ -291,7 +311,7 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         # and after the local/loopback rules above, so custom rules can override the
         # defaults but cannot lock out the operator's own scripts.
         # include_if_exists (PostgreSQL 16+): secret updates apply on config reload.
-        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
+        kubedb_write_user_hba
 
         { echo 'hostssl    all             all             0.0.0.0/0               cert clientcert=verify-full'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        0.0.0.0/0               cert clientcert=verify-full'; } >>/tmp/pg_hba.conf
@@ -312,7 +332,7 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         # and after the local/loopback rules above, so custom rules can override the
         # defaults but cannot lock out the operator's own scripts.
         # include_if_exists (PostgreSQL 16+): secret updates apply on config reload.
-        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
+        kubedb_write_user_hba
 
         { echo 'hostssl    all             all             0.0.0.0/0               scram-sha-256'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        0.0.0.0/0               scram-sha-256'; } >>/tmp/pg_hba.conf
@@ -333,7 +353,7 @@ if [[ "${SSL:-0}" == "ON" ]]; then
         # and after the local/loopback rules above, so custom rules can override the
         # defaults but cannot lock out the operator's own scripts.
         # include_if_exists (PostgreSQL 16+): secret updates apply on config reload.
-        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
+        kubedb_write_user_hba
 
         { echo 'hostssl    all             all             0.0.0.0/0               md5'; } >>/tmp/pg_hba.conf
         { echo 'hostssl    replication     postgres        0.0.0.0/0               md5'; } >>/tmp/pg_hba.conf
@@ -357,7 +377,7 @@ else
         # and after the local/loopback rules above, so custom rules can override the
         # defaults but cannot lock out the operator's own scripts.
         # include_if_exists (PostgreSQL 16+): secret updates apply on config reload.
-        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
+        kubedb_write_user_hba
 
         { echo 'host         all             all             0.0.0.0/0               scram-sha-256'; } >>/tmp/pg_hba.conf
         { echo 'host         replication     postgres        0.0.0.0/0               scram-sha-256'; } >>/tmp/pg_hba.conf
@@ -378,7 +398,7 @@ else
         # and after the local/loopback rules above, so custom rules can override the
         # defaults but cannot lock out the operator's own scripts.
         # include_if_exists (PostgreSQL 16+): secret updates apply on config reload.
-        { echo 'include_if_exists "/etc/config/user_hba.conf"'; } >>/tmp/pg_hba.conf
+        kubedb_write_user_hba
 
         { echo 'host         all             all             0.0.0.0/0               md5'; } >>/tmp/pg_hba.conf
         { echo 'host         replication     postgres        0.0.0.0/0               md5'; } >>/tmp/pg_hba.conf
