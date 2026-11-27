@@ -99,6 +99,48 @@ if [[ "${TDE_ENABLED:-false}" == "true" ]]; then
     echo "pg_tde.cipher = '${TDE_CIPHER:-aes_128}'" >>/tmp/postgresql.conf
 fi
 cat /run_scripts/role/postgresql.conf >>/tmp/postgresql.conf
+# The role template does not end in a newline, so anything appended after it would be
+# swallowed by its last comment line. Start a fresh line before writing more.
+printf '\n' >>/tmp/postgresql.conf
+
+# Replaying WAL makes this a standby, so PostgreSQL enforces that these settings are
+# each >= the value recorded in the source's pg_control; otherwise recovery stops with
+#   FATAL: recovery aborted because of insufficient parameter settings
+# On a KubeDB database these are normally raised through the config secret, which the
+# role template pulls in with `include_if_exists = '/etc/config/user.conf'`. That is
+# the right value in the common case, but it is the CURRENT configuration, not the one
+# the source was running under when the backup was taken -- so restoring an older
+# backup after the secret has been lowered still aborts replay, and the operator has
+# no way to know it will.
+# pg_control does know: it records exactly what the check compares against. Read the
+# values from there, appended after the role template so they take precedence during
+# recovery. This only affects the recovery instance; the restored database starts
+# again from its own configuration afterwards.
+if command -v pg_controldata >/dev/null 2>&1; then
+    control_setting() {
+        pg_controldata "$PGDATA" 2>/dev/null |
+            sed -n "s/^$1 setting: *\([0-9]\+\)$/\1/p"
+    }
+    for pair in \
+        "max_connections:max_connections" \
+        "max_worker_processes:max_worker_processes" \
+        "max_prepared_xacts:max_prepared_transactions" \
+        "max_locks_per_xact:max_locks_per_transaction"; do
+        control_field="${pair%%:*}"
+        guc="${pair##*:}"
+        value="$(control_setting "$control_field")"
+        if [[ -n "$value" ]]; then
+            echo "$guc = $value" >>/tmp/postgresql.conf
+        fi
+    done
+    # max_wal_senders is already pinned to 90 above; only raise it further if the
+    # source ran with more, never lower it.
+    senders="$(control_setting max_wal_senders)"
+    if [[ -n "$senders" ]] && [[ "$senders" -gt 90 ]]; then
+        echo "max_wal_senders = $senders" >>/tmp/postgresql.conf
+    fi
+fi
+
 mv /tmp/postgresql.conf "$PGDATA/postgresql.conf"
 echo "max_replication_slots = 90" >>/tmp/postgresql.conf
 # setup pg_hba.conf for initial start. this one is just for initialization
